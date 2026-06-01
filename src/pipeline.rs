@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
     use crate::compiler::{compile_doc, compile_mdoc, calculate_quality_score};
     use crate::parser::parse_html;
-    use crate::rfo_protocol::{FullDocPayload, MiniDocPayload, QaPair};
+    use crate::rfo_protocol::{FullDocPayload, MiniDocPayload};
     use crate::domain::RfoDomain;
 
 // ── Document Pipeline ────────────────────────────────────────────────────────
