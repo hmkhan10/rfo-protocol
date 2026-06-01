@@ -1,12 +1,15 @@
 pub mod admin;
 pub mod audit;
 pub mod auth;
+pub mod binary;
 pub mod cache;
 pub mod client;
 pub mod cli;
 pub mod compiler;
 pub mod crypto;
+pub mod domain;
 pub mod parser;
+pub mod pipeline;
 pub mod protocol;
 pub mod rfo_protocol;
 pub mod server;
