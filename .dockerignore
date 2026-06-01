@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .dockerignore — keep the build context clean and secrets out of the image
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Build artifacts
+target/
+*.o
+*.d
+*.rlib
+
+# Git
+.git/
+.github/
+.gitignore
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files (NEVER bake secrets into images)
+.env
+.env.*
+!.env.example
+
+# Documentation
+*.md
+LICENSE
+
+# Node.js
+node_modules/
+
+# Testing
+tests/
+*.test.*
+*bench*
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Cargo lock (library crate — let users resolve their own versions)
+Cargo.lock

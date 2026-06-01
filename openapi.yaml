@@ -1,0 +1,832 @@
+openapi: 3.1.0
+info:
+  title: RFO Protocol API
+  version: 1.0.0
+  description: |
+    ## RFO (Research For Optimization) Protocol
+    
+    A next-generation application-layer network protocol designed for AI web-scale agents.
+    RFO enables structured, verifiable, and efficient content delivery between origin servers
+    and AI agents through cryptographic site identification, quality scoring, and
+    token-optimized payloads.
+    
+    ### Key Concepts
+    - **Handshake**: Bidirectional protocol where the agent provides a domain URL and the engine
+      compiles, verifies, and returns structured `.doc` or `.mdoc` payloads.
+    - **Site ID**: Cryptographically derived, deterministic identity tied to domain + secret + time window.
+    - **Quality Score**: Automated 0–100 scoring of content structure, verifiability, and AEO readiness.
+    - **Payload Types**:
+      - `.doc` — Full deep-knowledge layout (markdown, data tables, verification signature).
+      - `.mdoc` — Token-optimized mini-document (< 1,500 tokens) for LLM context windows.
+    - **Streaming**: Binary chunked transfer for large payloads with checksums.
+    - **WebSocket**: Real-time pub/sub for domain update notifications.
+    - **Capability Negotiation**: Protocol version and encoding negotiation (JSON / MessagePack).
+    
+    ### Authentication
+    All protected endpoints require an `X-API-Key` header. Public endpoints (`/rfo/health`,
+    `/rfo/capabilities`, `/rfo/negotiate`) do not require authentication.
+    
+    ### Rate Limiting
+    - Per-IP: configurable (default 100 req/min)
+    - Global: configurable (default 1000 req/min)
+    
+    ### Protocol Versioning
+    The protocol uses semantic versioning (MAJOR.MINOR.PATCH). MAJOR version changes indicate
+    breaking changes. Clients must send `X-RFO-Protocol-Version` header for version negotiation.
+  contact:
+    name: RFO Protocol
+    url: https://github.com/hmkhan10/rfo-protocol
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+  - url: https://engine.rfo-protocol.dev
+    description: Production
+
+tags:
+  - name: Health
+    description: Health check and server status
+  - name: Protocol
+    description: Capability negotiation and protocol handshake
+  - name: Handshake
+    description: Core handshake protocol for content compilation
+  - name: Payloads
+    description: Retrieve compiled .doc and .mdoc payloads
+  - name: Streaming
+    description: Binary chunked payload streaming
+  - name: WebSocket
+    description: Real-time pub/sub updates
+  - name: Sites
+    description: Registered site registry
+  - name: Telemetry
+    description: Engine telemetry and metrics
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for client authentication. Obtain keys from your RFO deployment administrator.
+        Format: `X-API-Key: <your-api-key>`
+
+  schemas:
+    # ── Core Types ────────────────────────────────────────────────────────────
+    RfoHeader:
+      type: object
+      required: [site_id, coordinates, quality_score]
+      properties:
+        site_id:
+          type: string
+          description: Cryptographically derived site identifier (SHA-256 hex, 64 chars)
+          example: "a1b2c3d4e5f6..."
+        coordinates:
+          type: object
+          additionalProperties:
+            type: string
+          description: Semantic coordinates extracted from content
+          example: {"topic": "machine-learning", "subtopic": "transformers"}
+        quality_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Automated content quality score (0-100)
+          example: 85
+
+    QaPair:
+      type: object
+      required: [question, answer]
+      properties:
+        question:
+          type: string
+          description: Extracted question from content
+        answer:
+          type: string
+          description: Corresponding answer from content
+
+    MiniDocPayload:
+      type: object
+      required: [summary, token_count, qa_pairs]
+      description: Token-optimized mini-document for LLM context windows (< 1,500 tokens)
+      properties:
+        summary:
+          type: string
+          description: Concise summary of the page content
+        token_count:
+          type: integer
+          description: Estimated token count
+        qa_pairs:
+          type: array
+          items:
+            $ref: '#/components/schemas/QaPair'
+          description: Question-answer pairs for AEO
+
+    FullDocPayload:
+      type: object
+      required: [raw_markdown, data_tables, verification_signature]
+      description: Deep knowledge layout with markdown, data tables, and verification
+      properties:
+        raw_markdown:
+          type: string
+          description: Full content as structured markdown
+        data_tables:
+          type: array
+          items:
+            type: string
+          description: Extracted data tables as markdown
+        verification_signature:
+          type: string
+          description: HMAC signature for content verification
+
+    PayloadType:
+      type: string
+      enum: [doc, mdoc]
+      description: |
+        - `doc` — Full deep-knowledge payload
+        - `mdoc` — Token-optimized mini-document
+
+    Payload:
+      oneOf:
+        - $ref: '#/components/schemas/FullDocPayload'
+        - $ref: '#/components/schemas/MiniDocPayload'
+      description: Either a FullDocPayload or MiniDocPayload
+
+    # ── Handshake ─────────────────────────────────────────────────────────────
+    HandshakeRequest:
+      type: object
+      required: [domain_url, coordinates, requested_payload, nonce, timestamp]
+      properties:
+        domain_url:
+          type: string
+          format: uri
+          description: Target URL to compile
+          example: "https://example.com"
+        coordinates:
+          type: object
+          additionalProperties:
+            type: string
+          description: Client-provided semantic coordinates to merge
+        requested_payload:
+          $ref: '#/components/schemas/PayloadType'
+        nonce:
+          type: string
+          description: Cryptographic nonce for replay protection (generated via /rfo/handshake)
+          minLength: 32
+        timestamp:
+          type: integer
+          format: int64
+          description: Unix timestamp when nonce was generated (must be within 5 minutes)
+
+    HandshakeResponse:
+      type: object
+      required: [header, payload, processing_time_ms, nonce]
+      properties:
+        header:
+          $ref: '#/components/schemas/RfoHeader'
+        payload:
+          $ref: '#/components/schemas/Payload'
+        processing_time_ms:
+          type: integer
+          description: Server processing time in milliseconds
+        nonce:
+          type: string
+          description: Echoed nonce from request
+
+    BatchHandshakeRequest:
+      type: object
+      required: [domains]
+      properties:
+        domains:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+          maxItems: 20
+          description: List of domain URLs to compile in parallel
+        coordinates:
+          type: object
+          additionalProperties:
+            type: string
+          description: Shared coordinates for all domains
+        requested_payload:
+          $ref: '#/components/schemas/PayloadType'
+          default: mdoc
+
+    BatchResult:
+      type: object
+      properties:
+        domain:
+          type: string
+        status:
+          type: string
+          enum: [ok, error]
+        site_id:
+          type: string
+        quality_score:
+          type: integer
+        processing_time_ms:
+          type: integer
+        error:
+          type: string
+        status_code:
+          type: integer
+
+    # ── Capability Negotiation ────────────────────────────────────────────────
+    CapabilityRequest:
+      type: object
+      required: [supported_encodings, supported_features, protocol_version]
+      properties:
+        supported_encodings:
+          type: array
+          items:
+            type: string
+            enum: [application/json, application/msgpack]
+        supported_features:
+          type: array
+          items:
+            type: string
+        protocol_version:
+          type: string
+          example: "1.0.0"
+
+    CapabilityResponse:
+      type: object
+      required: [negotiated_encoding, supported_features, protocol_version, server_capabilities]
+      properties:
+        negotiated_encoding:
+          type: string
+          enum: [application/json, application/msgpack]
+        supported_features:
+          type: array
+          items:
+            type: string
+        protocol_version:
+          type: string
+        server_capabilities:
+          type: array
+          items:
+            type: string
+
+    # ── WebSocket ─────────────────────────────────────────────────────────────
+    WsSubscribe:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          enum: [subscribe]
+        payload:
+          type: object
+          required: [domains]
+          properties:
+            domains:
+              type: array
+              items:
+                type: string
+
+    WsUnsubscribe:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          enum: [unsubscribe]
+        payload:
+          type: object
+          required: [domains]
+          properties:
+            domains:
+              type: array
+              items:
+                type: string
+
+    WsUpdate:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [update]
+        payload:
+          type: object
+          properties:
+            domain:
+              type: string
+            quality_score:
+              type: integer
+            timestamp:
+              type: string
+              format: date-time
+
+    WsError:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [error]
+        payload:
+          type: object
+          properties:
+            code:
+              type: integer
+            message:
+              type: string
+
+    # ── Streaming ─────────────────────────────────────────────────────────────
+    StreamChunk:
+      type: object
+      required: [chunk_index, total_chunks, data, checksum]
+      properties:
+        chunk_index:
+          type: integer
+          description: Zero-based chunk index
+        total_chunks:
+          type: integer
+          description: Total number of chunks
+        data:
+          type: string
+          format: byte
+          description: Base64-encoded chunk data
+        checksum:
+          type: string
+          description: SHA-256 checksum of the chunk
+
+    # ── Site ──────────────────────────────────────────────────────────────────
+    Site:
+      type: object
+      properties:
+        site_id:
+          type: string
+        domain_url:
+          type: string
+          format: uri
+        quality_score:
+          type: integer
+        coordinates:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ── Telemetry ─────────────────────────────────────────────────────────────
+    TelemetryReport:
+      type: object
+      properties:
+        total_requests:
+          type: integer
+        cache_hits:
+          type: integer
+        cache_misses:
+          type: integer
+        hit_ratio:
+          type: number
+          format: float
+        avg_processing_time_ms:
+          type: number
+          format: float
+        quality_scores:
+          type: array
+          items:
+            type: object
+            properties:
+              site_id:
+                type: string
+              domain:
+                type: string
+              score:
+                type: integer
+
+    # ── Health ────────────────────────────────────────────────────────────────
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        protocol:
+          type: string
+          example: "rfo-core"
+        version:
+          type: string
+          example: "0.1.0"
+        protocol_version:
+          type: string
+          example: "1.0.0"
+        min_supported:
+          type: string
+          example: "1.0.0"
+        capabilities:
+          type: array
+          items:
+            type: string
+
+    # ── Errors ────────────────────────────────────────────────────────────────
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+
+  headers:
+    X-RFO-Protocol-Version:
+      schema:
+        type: string
+      description: RFO protocol version used in the response
+    X-RFO-Site-ID:
+      schema:
+        type: string
+      description: Site ID of the compiled domain
+
+paths:
+  # ── Health ──────────────────────────────────────────────────────────────────
+  /rfo/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: |
+        Public endpoint. Returns server health status, protocol version, and capabilities.
+        Used by load balancers and orchestrators for liveness/readiness probes.
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Server is unhealthy
+
+  # ── Capability Negotiation ──────────────────────────────────────────────────
+  /rfo/capabilities:
+    get:
+      tags: [Protocol]
+      summary: Get server capabilities
+      description: |
+        Public endpoint. Returns the full list of supported encodings, features,
+        and protocol limits. Used by clients to discover what the server supports.
+      operationId: getCapabilities
+      security: []
+      responses:
+        '200':
+          description: Server capabilities
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  protocol_version:
+                    type: string
+                  encodings:
+                    type: array
+                    items:
+                      type: string
+                  features:
+                    type: array
+                    items:
+                      type: string
+                  max_batch_size:
+                    type: integer
+                  max_payload_size_bytes:
+                    type: integer
+                  websocket:
+                    type: object
+                    properties:
+                      max_connections:
+                        type: integer
+                      ping_interval_ms:
+                        type: integer
+
+  /rfo/negotiate:
+    post:
+      tags: [Protocol]
+      summary: Negotiate capabilities
+      description: |
+        Public endpoint. Client sends its supported encodings and features;
+        server responds with the negotiated encoding and common feature set.
+      operationId: negotiate
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CapabilityRequest'
+      responses:
+        '200':
+          description: Negotiated capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityResponse'
+
+  # ── Handshake ───────────────────────────────────────────────────────────────
+  /rfo/handshake:
+    post:
+      tags: [Handshake]
+      summary: Duplex handshake
+      description: |
+        Core protocol endpoint. The client provides a domain URL and the engine:
+        1. Verifies nonce freshness (replay protection, 5-minute window)
+        2. Checks cache (sub-5ms path)
+        3. Fetches and parses the target URL
+        4. Extracts semantic coordinates
+        5. Generates cryptographic site ID
+        6. Compiles .doc and .mdoc payloads
+        7. Calculates quality score
+        8. Caches the result
+        9. Upserts the site record in the database
+        10. Returns the compiled payload
+      operationId: handshake
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandshakeRequest'
+      responses:
+        '200':
+          description: Handshake successful
+          headers:
+            X-RFO-Protocol-Version:
+              $ref: '#/components/headers/X-RFO-Protocol-Version'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HandshakeResponse'
+        '401':
+          description: Invalid/expired nonce or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+        '502':
+          description: Failed to fetch target URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /rfo/batch-handshake:
+    post:
+      tags: [Handshake]
+      summary: Batch handshake (up to 20 domains)
+      description: |
+        Compiles multiple domains in parallel. Each domain is processed independently
+        and results are returned as an array. Max 20 domains per batch.
+      operationId: batchHandshake
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchHandshakeRequest'
+      responses:
+        '200':
+          description: Batch results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BatchResult'
+        '400':
+          description: Invalid request (empty domains or > 20)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ── Payloads ────────────────────────────────────────────────────────────────
+  /rfo/doc/{domain}:
+    get:
+      tags: [Payloads]
+      summary: Get full .doc payload
+      description: |
+        Returns the compiled FullDocPayload for a domain. The domain must have
+        been previously compiled via a handshake. Returns 404 if not found.
+      operationId: getDoc
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: domain
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Domain URL (e.g., "https://example.com")
+      responses:
+        '200':
+          description: Full document payload
+          headers:
+            X-RFO-Protocol-Version:
+              $ref: '#/components/headers/X-RFO-Protocol-Version'
+            X-RFO-Site-ID:
+              $ref: '#/components/headers/X-RFO-Site-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FullDocPayload'
+        '404':
+          description: Domain not compiled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /rfo/mdoc/{domain}:
+    get:
+      tags: [Payloads]
+      summary: Get mini .mdoc payload
+      description: |
+        Returns the compiled MiniDocPayload for a domain. Optimized for LLM
+        context windows (< 1,500 tokens).
+      operationId: getMdoc
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: domain
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Domain URL
+      responses:
+        '200':
+          description: Mini document payload
+          headers:
+            X-RFO-Protocol-Version:
+              $ref: '#/components/headers/X-RFO-Protocol-Version'
+            X-RFO-Site-ID:
+              $ref: '#/components/headers/X-RFO-Site-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MiniDocPayload'
+        '404':
+          description: Domain not compiled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ── Streaming ───────────────────────────────────────────────────────────────
+  /rfo/stream/{domain}:
+    get:
+      tags: [Streaming]
+      summary: Stream .doc payload (binary)
+      description: |
+        Returns the full .doc payload as raw bytes with content-length header.
+        Use for large payloads where streaming is more efficient than JSON.
+      operationId: streamDoc
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: domain
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Binary payload stream
+          headers:
+            X-RFO-Protocol-Version:
+              $ref: '#/components/headers/X-RFO-Protocol-Version'
+            X-RFO-Site-ID:
+              $ref: '#/components/headers/X-RFO-Site-ID'
+            Content-Type:
+              schema:
+                type: string
+              example: application/json
+            Content-Length:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Domain not compiled
+
+  /rfo/stream-mdoc/{domain}:
+    get:
+      tags: [Streaming]
+      summary: Stream .mdoc payload (binary)
+      description: Returns the .mdoc payload as raw bytes.
+      operationId: streamMdoc
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: domain
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Binary payload stream
+          headers:
+            X-RFO-Protocol-Version:
+              $ref: '#/components/headers/X-RFO-Protocol-Version'
+            X-RFO-Site-ID:
+              $ref: '#/components/headers/X-RFO-Site-ID'
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Domain not compiled
+
+  # ── Sites ───────────────────────────────────────────────────────────────────
+  /rfo/sites:
+    get:
+      tags: [Sites]
+      summary: List registered sites
+      description: |
+        Returns up to 50 registered sites, ordered by quality score descending.
+      operationId: listSites
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: List of registered sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Site'
+
+  # ── Telemetry ───────────────────────────────────────────────────────────────
+  /rfo/telemetry:
+    get:
+      tags: [Telemetry]
+      summary: Telemetry dashboard
+      description: |
+        Returns engine telemetry: request counts, cache hit ratios,
+        average processing times, and quality score history.
+      operationId: getTelemetry
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Telemetry report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryReport'
+
+  # ── WebSocket ───────────────────────────────────────────────────────────────
+  /rfo/ws:
+    get:
+      tags: [WebSocket]
+      summary: WebSocket connection
+      description: |
+        Upgrade to WebSocket for real-time domain update notifications.
+        
+        **Protocol:**
+        1. Client connects to `/rfo/ws`
+        2. Server accepts upgrade
+        3. Client sends `{"type": "subscribe", "payload": {"domains": ["example.com"]}}`
+        4. Server sends `{"type": "subscribed", "domains": ["example.com"]}`
+        5. When a domain is updated, server sends `{"type": "update", "payload": {...}}`
+        6. Client can send `{"type": "ping"}` — server responds with `{"type": "pong"}`
+        7. Client sends `{"type": "unsubscribe", "payload": {"domains": ["example.com"]}}`
+        
+        **Message Types (client → server):**
+        - `subscribe` — Subscribe to domain updates
+        - `unsubscribe` — Unsubscribe from domain updates
+        - `ping` — Keep-alive ping
+        
+        **Message Types (server → client):**
+        - `subscribed` — Confirmation of subscription
+        - `unsubscribed` — Confirmation of unsubscription
+        - `update` — Domain quality score updated
+        - `pong` — Keep-alive pong
+        - `error` — Error message
+      operationId: wsConnect
+      security: []
+      responses:
+        '101':
+          description: WebSocket upgrade successful
+
+security:
+  - ApiKeyAuth: []

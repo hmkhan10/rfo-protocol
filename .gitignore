@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RFO Protocol — .gitignore
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Build Artifacts ──────────────────────────────────────────────────────────
+/target/
+*.o
+*.d
+*.rlib
+*.so
+*.dylib
+
+# ── Cargo ────────────────────────────────────────────────────────────────────
+# Library crate: don't commit lock file (let users resolve their own versions)
+Cargo.lock
+
+# ── Environment / Secrets (NEVER commit) ────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Secrets & Credentials (NEVER commit) ────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.secret
+*.credentials
+secrets.json
+service-account*.json
+
+# ── IDE / Editor ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+
+# ── OS Files ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Node.js (if any frontend work) ──────────────────────────────────────────
+node_modules/
+.next/
+out/
+*.log
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ── Testing / Coverage ───────────────────────────────────────────────────────
+*.profraw
+*.profdata
+coverage/
+lcov.info

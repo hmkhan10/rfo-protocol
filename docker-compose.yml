@@ -1,0 +1,102 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RFO Protocol Engine — Docker Compose (Production Stack)
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage:
+#   cp .env.example .env          # create your secrets
+#   docker compose up -d          # start the stack
+#   docker compose logs -f engine # watch logs
+#   docker compose down -v        # stop + remove volumes
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── PostgreSQL 16 ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: rfo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rfo_protocol}
+      POSTGRES_USER: ${POSTGRES_USER:-rfo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rfo_dev_pass}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rfo} -d ${POSTGRES_DB:-rfo_protocol}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - rfo-internal
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── RFO Core Engine ────────────────────────────────────────────────────────
+  engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rfo-engine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgres://${POSTGRES_USER:-rfo}:${POSTGRES_PASSWORD:-rfo_dev_pass}@postgres:5432/${POSTGRES_DB:-rfo_protocol}
+
+      # Security (REQUIRED — engine won't start without these)
+      RFO_SECRET_KEY: ${RFO_SECRET_KEY:-dev_secret_key_for_local_only_32bytes!!}
+
+      # API Keys (comma-separated: name=key,name=key)
+      RFO_API_KEYS: ${RFO_API_KEYS:-agent_alpha=dev_key_1,agent_beta=dev_key_2}
+
+      # Server
+      RFO_BIND_ADDR: "0.0.0.0:3000"
+
+      # CORS (comma-separated origins, or * for dev)
+      RFO_CORS_ORIGINS: ${RFO_CORS_ORIGINS:-*}
+
+      # DDoS Protection
+      RFO_DDOSS_MAX_PER_IP: ${RFO_DDOSS_MAX_PER_IP:-100}
+      RFO_DDOSS_MAX_GLOBAL: ${RFO_DDOSS_MAX_GLOBAL:-1000}
+
+      # Logging
+      RUST_LOG: ${RUST_LOG:-info,rfo_core=info,tower_http=info}
+    ports:
+      - "${ENGINE_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/rfo/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - rfo-internal
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    # Read-only root filesystem (security hardening)
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Drop all capabilities, only add what we need
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+networks:
+  rfo-internal:
+    driver: bridge
+    name: rfo-network
+
+volumes:
+  postgres_data:
+    driver: local
+    name: rfo-postgres-data
