@@ -13,11 +13,14 @@ This document defines the wire format, protocols, and data schemas for the RFO (
 3. [Content Types](#content-types)
 4. [Handshake Protocol](#handshake-protocol)
 5. [Payload Schemas](#payload-schemas)
-6. [Capability Negotiation](#capability-negotiation)
-7. [Streaming Protocol](#streaming-protocol)
-8. [WebSocket Protocol](#websocket-protocol)
-9. [Authentication](#authentication)
-10. [Error Handling](#error-handling)
+6. [.opt Domain Protocol](#opt-domain-protocol)
+7. [Binary Wire Format](#binary-wire-format)
+8. [Capability Negotiation](#capability-negotiation)
+9. [Streaming Protocol](#streaming-protocol)
+10. [WebSocket Protocol](#websocket-protocol)
+11. [Authentication](#authentication)
+12. [Admin API](#admin-api)
+13. [Error Handling](#error-handling)
 
 ---
 
@@ -54,7 +57,13 @@ RFO is an application-layer protocol that enables AI agents to efficiently disco
   │  └──────────────────────────────────┘   │
   │                                         │
   │  ┌──────────────────────────────────┐   │
-  │  │  4. REAL-TIME UPDATES (optional) │   │
+  │  │  4. BINARY STREAMING (optional)  │   │
+  │  │  GET /rfo/stream/{domain}        │   │
+  │  │  ◀─── BinaryHeader + payload     │   │
+  │  └──────────────────────────────────┘   │
+  │                                         │
+  │  ┌──────────────────────────────────┐   │
+  │  │  5. REAL-TIME UPDATES (optional) │   │
   │  │  GET /rfo/ws                     │   │
   │  │  { type: "subscribe", ... }      │   │
   │  │  ◀─── { type: "update", ... }    │   │
@@ -96,6 +105,7 @@ Client 2.0.0 ↔ Server 1.0.0  ✗ Incompatible (major mismatch)
 |------|------|-------------|
 | JSON | `application/json` | Default encoding |
 | MessagePack | `application/msgpack` | Binary encoding (smaller payloads) |
+| Binary | `application/octet-stream` | Native Rust binary protocol |
 
 Content type is negotiated via `POST /rfo/negotiate`.
 
@@ -236,9 +246,187 @@ Deep knowledge layout with full markdown and verification.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `site_id` | string | HMAC-SHA256 of `{domain}|{hour_window}` |
+| `site_id` | string | HMAC-SHA256 of `{domain}\|{hour_window}` |
 | `coordinates` | object | Semantic coordinates (auto-extracted + client-provided) |
 | `quality_score` | integer (0-100) | Content quality score |
+
+---
+
+## .opt Domain Protocol
+
+The `.opt` domain is a purpose-built TLD for AI-optimized content delivery. RFO treats `.opt` domains as first-class citizens with native parsing, metadata generation, and structured data support.
+
+### Domain Parsing
+
+```json
+{
+  "subdomain": "api",
+  "domain": "mysite",
+  "tld": "opt",
+  "full": "api.mysite.opt",
+  "is_opt": true
+}
+```
+
+### SEO/GEO/AEO Metadata
+
+When a `.opt` domain is compiled, RFO automatically generates rich metadata:
+
+```json
+{
+  "seo": {
+    "title": "My AI-Optimized Site",
+    "description": "Concise description for search engines...",
+    "canonical_url": "https://mysite.opt",
+    "structured_data": "{\"@type\":\"WebSite\",\"url\":\"https://mysite.opt\"}",
+    "open_graph": {
+      "og:title": "My AI-Optimized Site",
+      "og:description": "Concise description...",
+      "og:type": "website",
+      "og:url": "https://mysite.opt"
+    }
+  },
+  "geo": {
+    "llm_friendly_content": true,
+    "direct_answers": true,
+    "structured_data_format": "JSON-LD",
+    "content_freshness": "2026-01-01T00:00:00Z"
+  },
+  "aeo": {
+    "faq_schema": true,
+    "qa_pairs": [
+      {
+        "question": "What is this site about?",
+        "answer": "This site provides AI-optimized documentation..."
+      }
+    ],
+    "featured_snippet_ready": true,
+    "voice_search_optimized": true
+  }
+}
+```
+
+### JSON-LD Schema Generation
+
+For `.opt` domains, RFO automatically generates JSON-LD schemas:
+
+```json
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "url": "https://mysite.opt",
+  "name": "My AI-Optimized Site",
+  "description": "Concise description...",
+  "potentialAction": {
+    "@type": "SearchAction",
+    "target": "https://mysite.opt/search?q={search_term_string}",
+    "query-input": "required name=search_term_string"
+  }
+}
+```
+
+### FAQ Schema
+
+RFO generates FAQ structured data for AEO-optimized content:
+
+```json
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is RFO?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "RFO is a protocol for AI agents to consume web content."
+      }
+    }
+  ]
+}
+```
+
+### Handshake with .opt Domain
+
+```bash
+curl -X POST http://localhost:3000/rfo/handshake \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "domain_url": "https://mysite.opt",
+    "coordinates": { "topic": "documentation" },
+    "requested_payload": "Mdoc",
+    "nonce": "550e8400-e29b-41d4-a716-446655440000",
+    "timestamp": 1700000000
+  }'
+```
+
+The engine will:
+1. Parse the `.opt` domain and extract metadata
+2. Generate SEO/GEO/AEO structured data
+3. Create JSON-LD and FAQ schemas
+4. Compile `.doc` and `.mdoc` with rich metadata
+5. Return the site with quality score reflecting AEO readiness
+
+---
+
+## Binary Wire Format
+
+RFO supports a native binary protocol for efficient `.doc`/`.mdoc` transfer via Rust. This is used for streaming endpoints and high-throughput scenarios.
+
+### Binary Header (11 bytes)
+
+```
+Offset  Size  Field       Description
+0       4     magic       Magic bytes: 0x52464F00 (RFO\0)
+4       2     version     Protocol version (0x0001 = v1)
+6       1     payload_type  0x01 = .mdoc, 0x02 = .doc, 0x03 = batch
+7       4     length      Payload length in bytes (little-endian)
+```
+
+### Payload Type Markers
+
+| Marker | Type | Description |
+|--------|------|-------------|
+| `0x01` | `.mdoc` | Mini document payload |
+| `0x02` | `.doc` | Full document payload |
+| `0x03` | batch | Batch of payloads |
+
+### CRC32 Checksum
+
+Each payload includes a CRC32 checksum for integrity verification:
+
+```
+[BinaryHeader][Payload Data][CRC32 (4 bytes)]
+```
+
+The CRC32 is computed over the payload data bytes and appended after the payload.
+
+### Serialization
+
+```rust
+// Serialize a .mdoc payload
+let header = BinaryHeader::new(PayloadType::Mdoc, payload_bytes.len() as u32);
+let mut buffer = Vec::new();
+header.write_to(&mut buffer)?;
+buffer.extend_from_slice(&payload_bytes);
+let checksum = crc32fast::hash(&payload_bytes);
+buffer.extend_from_slice(&checksum.to_le_bytes());
+
+// Deserialize
+let (header, payload, checksum) = BinaryProtocol::deserialize(&buffer)?;
+assert!(BinaryProtocol::verify_checksum(payload, checksum));
+```
+
+### Batch Binary Format
+
+For batch transfers, multiple payloads are serialized sequentially:
+
+```
+[Header1][Payload1][CRC1][Header2][Payload2][CRC2]...
+```
+
+Each header indicates the payload type and length, allowing the receiver to parse each payload independently.
 
 ---
 
@@ -272,7 +460,9 @@ Content-Type: application/json
     "handshake",
     "batch-handshake",
     "websocket",
-    "streaming"
+    "streaming",
+    "opt-domain",
+    "binary-protocol"
   ]
 }
 ```
@@ -285,6 +475,9 @@ Content-Type: application/json
 | `batch-handshake` | Batch handshake (up to 20 domains) |
 | `websocket` | Real-time pub/sub updates |
 | `streaming` | Binary chunked payload transfer |
+| `opt-domain` | Native .opt domain support |
+| `binary-protocol` | Binary wire format with CRC32 |
+| `document-pipeline` | Automatic .doc/.mdoc generation |
 
 ---
 
@@ -311,6 +504,14 @@ Content-Length: 1024
 ```
 
 Body: Raw payload bytes.
+
+### Binary Stream Format
+
+For native binary streaming:
+
+```
+[BinaryHeader (11 bytes)][Payload Data][CRC32 (4 bytes)]
+```
 
 ### StreamChunk Format
 
@@ -455,6 +656,71 @@ let signature = hmac_sha256(body, secret_key);
 // signature = 64 hex characters
 ```
 
+### Cryptographic Operations
+
+RFO uses production-grade cryptography:
+
+| Operation | Algorithm | Use Case |
+|-----------|-----------|----------|
+| Site ID | HMAC-SHA256 | Domain + hour window identification |
+| Content Hash | SHA-256 | Payload integrity verification |
+| Request Signing | HMAC-SHA256 | Request body tampering detection |
+| Key Derivation | HKDF-SHA256 | Secure key expansion |
+| Content Integrity | HMAC-SHA256 | Domain-bound content verification |
+
+---
+
+## Admin API
+
+The Admin API provides management capabilities for the RFO engine. All admin endpoints are nested under `/rfo/admin/*` and use separate authentication.
+
+### Authentication
+
+Admin endpoints use JWT tokens. Obtain a token via `/rfo/admin/login`:
+
+```
+POST /rfo/admin/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "secure-password"
+}
+```
+
+Response:
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "role": "admin",
+  "expires_at": "2026-01-01T12:00:00Z"
+}
+```
+
+### RBAC Roles
+
+| Role | Permissions |
+|------|-------------|
+| `admin` | Full access (users, keys, cache, audit, stats) |
+| `operator` | Read-only access (stats, audit, keys) |
+| `viewer` | Read-only (stats, audit) |
+
+### Endpoints
+
+| Endpoint | Method | Role | Description |
+|----------|--------|------|-------------|
+| `/rfo/admin/login` | POST | public | Admin login (returns JWT) |
+| `/rfo/admin/users` | POST | admin | Create admin user |
+| `/rfo/admin/users/{id}/password` | PUT | admin | Change password |
+| `/rfo/admin/stats` | GET | operator | System statistics |
+| `/rfo/admin/sites` | GET | operator | List sites (paginated, searchable) |
+| `/rfo/admin/sites/{domain}` | DELETE | admin | Delete site |
+| `/rfo/admin/audit` | GET | operator | Audit logs (paginated, filterable) |
+| `/rfo/admin/keys` | GET/POST | admin | List/create API keys |
+| `/rfo/admin/keys/{name}` | DELETE | admin | Revoke API key |
+| `/rfo/admin/cache/purge` | POST | admin | Purge cache |
+| `/rfo/admin/health` | GET | operator | Detailed health check |
+
 ---
 
 ## Error Handling
@@ -466,6 +732,7 @@ let signature = hmac_sha256(body, secret_key);
 | `200` | Success |
 | `400` | Bad Request (validation error) |
 | `401` | Unauthorized (missing/invalid API key) |
+| `403` | Forbidden (insufficient permissions) |
 | `404` | Not Found (domain not compiled) |
 | `422` | Unprocessable Entity (malformed JSON) |
 | `429` | Too Many Requests (rate limited) |
@@ -533,4 +800,19 @@ let signature = hmac_sha256(body, secret_key);
     "processing_time_ms": 89,
     "nonce": "550e8400-e29b-41d4-a716-446655440000"
   }
+```
+
+### Binary Stream Exchange
+
+```
+→ GET /rfo/stream/mysite.opt
+  X-API-Key: agent_alpha key_abc123
+
+← 200 OK
+  X-RFO-Protocol-Version: 1.0.0
+  X-RFO-Site-ID: a1b2c3d4e5f6...
+  Content-Type: application/octet-stream
+  Content-Length: 1024
+
+  [BinaryHeader (11 bytes)][Payload][CRC32 (4 bytes)]
 ```

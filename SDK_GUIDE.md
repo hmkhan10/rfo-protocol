@@ -12,10 +12,12 @@
 4. [Handshake](#handshake)
 5. [Batch Handshake](#batch-handshake)
 6. [Payload Retrieval](#payload-retrieval)
-7. [Capability Negotiation](#capability-negotiation)
-8. [WebSocket](#websocket)
-9. [Error Handling](#error-handling)
-10. [Examples](#examples)
+7. [Binary Streaming](#binary-streaming)
+8. [.opt Domain Support](#opt-domain-support)
+9. [Capability Negotiation](#capability-negotiation)
+10. [WebSocket](#websocket)
+11. [Error Handling](#error-handling)
+12. [Examples](#examples)
 
 ---
 
@@ -37,6 +39,15 @@ For MessagePack support:
 [dependencies]
 rfo-core = "1.0.0"
 rmp-serde = "1"
+```
+
+For binary protocol support:
+
+```toml
+[dependencies]
+rfo-core = "1.0.0"
+bytes = "1"
+crc32fast = "1"
 ```
 
 ---
@@ -191,6 +202,154 @@ for site in sites {
 
 ---
 
+## Binary Streaming
+
+RFO supports native binary transfer of `.doc`/`.mdoc` payloads with CRC32 checksums.
+
+### Binary Header Format
+
+```
+Offset  Size  Field         Description
+0       4     magic         0x52464F00 (RFO\0)
+4       2     version       0x0001
+6       1     payload_type  0x01=.mdoc, 0x02=.doc, 0x03=batch
+7       4     length        Payload length (little-endian)
+```
+
+### Streaming a .doc Payload
+
+```rust
+use rfo_core::binary::{BinaryHeader, PayloadType};
+
+let mut stream = client.stream_doc("example.com").await?;
+
+while let Some(chunk) = stream.next().await {
+    let chunk = chunk?;
+    println!("Chunk {}/{}: {} bytes",
+        chunk.chunk_index + 1,
+        chunk.total_chunks,
+        chunk.data.len()
+    );
+}
+```
+
+### Binary Protocol Usage
+
+```rust
+use rfo_core::binary::{BinaryProtocol, BinaryHeader, PayloadType};
+
+// Serialize a .mdoc payload
+let header = BinaryHeader::new(PayloadType::Mdoc, payload_bytes.len() as u32);
+let mut buffer = Vec::new();
+header.write_to(&mut buffer)?;
+buffer.extend_from_slice(&payload_bytes);
+let checksum = crc32fast::hash(&payload_bytes);
+buffer.extend_from_slice(&checksum.to_le_bytes());
+
+// Deserialize
+let (header, payload, checksum) = BinaryProtocol::deserialize(&buffer)?;
+assert!(BinaryProtocol::verify_checksum(payload, checksum));
+```
+
+---
+
+## .opt Domain Support
+
+RFO natively supports `.opt` domains with automatic SEO/GEO/AEO metadata generation.
+
+### Handshake with .opt Domain
+
+```rust
+let response = client.handshake("https://mysite.opt").await?;
+
+// The engine automatically generates:
+// - SEO metadata (title, description, canonical URL)
+// - GEO metadata (LLM-friendly content, direct answers)
+// - AEO metadata (FAQ schema, Q&A pairs)
+// - JSON-LD structured data
+```
+
+### Domain Parsing
+
+```rust
+use rfo_core::domain::RfoDomain;
+
+let domain = RfoDomain::parse("https://api.mysite.opt")?;
+
+assert_eq!(domain.subdomain, Some("api".to_string()));
+assert_eq!(domain.domain, "mysite");
+assert_eq!(domain.tld, Tld::Opt);
+assert!(domain.is_opt());
+```
+
+### JSON-LD Generation
+
+```rust
+use rfo_core::domain::{OptMetadata, SeoMetadata, GeoMetadata, AeoMetadata};
+
+let metadata = OptMetadata {
+    seo: SeoMetadata {
+        title: "My AI-Optimized Site".to_string(),
+        description: "Concise description...".to_string(),
+        canonical_url: "https://mysite.opt".to_string(),
+        structured_data: "{\"@type\":\"WebSite\"}".to_string(),
+        open_graph: Default::default(),
+    },
+    geo: GeoMetadata {
+        llm_friendly_content: true,
+        direct_answers: true,
+        structured_data_format: "JSON-LD".to_string(),
+        content_freshness: "2026-01-01T00:00:00Z".to_string(),
+    },
+    aeo: AeoMetadata {
+        faq_schema: true,
+        qa_pairs: vec![],
+        featured_snippet_ready: true,
+        voice_search_optimized: true,
+    },
+};
+
+let json_ld = metadata.generate_json_ld("https://mysite.opt");
+let faq_schema = metadata.generate_faq_schema();
+```
+
+---
+
+## Document Pipeline
+
+RFO provides a document pipeline for batch compilation of websites.
+
+### Compile a Single Page
+
+```rust
+use rfo_core::pipeline::{DocumentPipeline, PipelineConfig};
+
+let pipeline = DocumentPipeline::new(PipelineConfig::default());
+
+let page = pipeline.compile_page(
+    "https://mysite.opt/docs/getting-started",
+    &html_content,
+).await?;
+
+println!("Quality: {}", page.quality_score);
+println!("Tokens: {}", page.token_count);
+```
+
+### Compile an Entire Site
+
+```rust
+let site = pipeline.compile_site(
+    "https://mysite.opt",
+    &pages,
+).await?;
+
+println!("Pages: {}", site.stats.total_pages);
+println!("Avg Quality: {}", site.stats.avg_quality_score);
+println!("Total Tokens: {}", site.stats.total_tokens);
+```
+
+---
+
 ## Capability Negotiation
 
 Query server capabilities before handshake:
@@ -206,6 +365,8 @@ let request = CapabilityRequest {
     supported_features: vec![
         "handshake".to_string(),
         "websocket".to_string(),
+        "opt-domain".to_string(),
+        "binary-protocol".to_string(),
     ],
     protocol_version: "1.0.0".to_string(),
 };
@@ -364,6 +525,25 @@ async fn process_with_retry(
     }
     unreachable!()
 }
+```
+
+### Example 4: .opt Domain with AEO
+
+```rust
+use rfo_core::domain::{RfoDomain, OptMetadata};
+
+// Parse .opt domain
+let domain = RfoDomain::parse("https://mysite.opt")?;
+assert!(domain.is_opt());
+
+// Generate metadata
+let metadata = OptMetadata::default();
+let json_ld = metadata.generate_json_ld(&domain.full_url());
+let faq = metadata.generate_faq_schema();
+
+// Use in handshake
+let response = client.handshake("https://mysite.opt").await?;
+// Engine automatically enriches with .opt metadata
 ```
 
 ---

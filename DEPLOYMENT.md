@@ -11,9 +11,10 @@
 3. [Manual Deployment](#manual-deployment)
 4. [Environment Variables](#environment-variables)
 5. [Security Hardening](#security-hardening)
-6. [Production Checklist](#production-checklist)
-7. [Monitoring](#monitoring)
-8. [Troubleshooting](#troubleshooting)
+6. [.opt Domain Configuration](#opt-domain-configuration)
+7. [Production Checklist](#production-checklist)
+8. [Monitoring](#monitoring)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -73,8 +74,13 @@ docker compose up -d
 # Health check
 curl http://localhost:3000/rfo/health
 
-# List endpoints
+# List capabilities
 curl http://localhost:3000/rfo/capabilities
+
+# Test admin login
+curl -X POST http://localhost:3000/rfo/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "your-admin-password"}'
 ```
 
 ---
@@ -227,6 +233,147 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO rfo;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO rfo;
 ```
 
+### 7. Admin User Setup
+
+After deploying, create the initial admin user:
+
+```bash
+# Via API
+curl -X POST http://localhost:3000/rfo/admin/users \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "username": "admin",
+    "password": "secure-password",
+    "role": "admin"
+  }'
+```
+
+---
+
+## .opt Domain Configuration
+
+### Overview
+
+The `.opt` domain is a purpose-built TLD for AI-optimized content delivery. RFO treats `.opt` domains as first-class citizens with:
+
+- Native parsing and metadata generation
+- Automatic SEO/GEO/AEO metadata
+- JSON-LD and FAQ schema generation
+- Quality scoring based on AEO readiness
+
+### How It Works
+
+1. **Domain Registration**: Website owners register `.opt` domains (e.g., `mysite.opt`)
+2. **Content Compilation**: RFO compiles `.opt` domains with rich metadata
+3. **Agent Discovery**: AI agents discover `.opt` domains via the protocol
+4. **Structured Delivery**: `.opt` content includes SEO/GEO/AEO metadata
+
+### SEO Metadata
+
+Automatically generated for `.opt` domains:
+
+```json
+{
+  "title": "My AI-Optimized Site",
+  "description": "Concise description for search engines...",
+  "canonical_url": "https://mysite.opt",
+  "structured_data": "{\"@type\":\"WebSite\",\"url\":\"https://mysite.opt\"}",
+  "open_graph": {
+    "og:title": "My AI-Optimized Site",
+    "og:description": "Concise description...",
+    "og:type": "website",
+    "og:url": "https://mysite.opt"
+  }
+}
+```
+
+### GEO Metadata
+
+LLM-friendly content optimization:
+
+```json
+{
+  "llm_friendly_content": true,
+  "direct_answers": true,
+  "structured_data_format": "JSON-LD",
+  "content_freshness": "2026-01-01T00:00:00Z"
+}
+```
+
+### AEO Metadata
+
+Answer Engine Optimization:
+
+```json
+{
+  "faq_schema": true,
+  "qa_pairs": [
+    {
+      "question": "What is this site about?",
+      "answer": "This site provides AI-optimized documentation..."
+    }
+  ],
+  "featured_snippet_ready": true,
+  "voice_search_optimized": true
+}
+```
+
+### JSON-LD Schemas
+
+RFO automatically generates structured data:
+
+```json
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "url": "https://mysite.opt",
+  "name": "My AI-Optimized Site",
+  "description": "Concise description...",
+  "potentialAction": {
+    "@type": "SearchAction",
+    "target": "https://mysite.opt/search?q={search_term_string}",
+    "query-input": "required name=search_term_string"
+  }
+}
+```
+
+### FAQ Schema
+
+For AEO-optimized content:
+
+```json
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is RFO?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "RFO is a protocol for AI agents to consume web content."
+      }
+    }
+  ]
+}
+```
+
+### Handshake with .opt Domain
+
+```bash
+curl -X POST http://localhost:3000/rfo/handshake \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "domain_url": "https://mysite.opt",
+    "coordinates": { "topic": "documentation" },
+    "requested_payload": "Mdoc",
+    "nonce": "550e8400-e29b-41d4-a716-446655440000",
+    "timestamp": 1700000000
+  }'
+```
+
 ---
 
 ## Production Checklist
@@ -249,6 +396,8 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO rfo;
 - [ ] API key authentication works
 - [ ] WebSocket connection works
 - [ ] Rate limiting active (test with rapid requests)
+- [ ] Admin user created with strong password
+- [ ] Admin API accessible via `/rfo/admin/*`
 
 ### Post-Deployment
 
@@ -257,6 +406,7 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO rfo;
 - [ ] Backup schedule for PostgreSQL
 - [ ] Backup verification tested
 - [ ] Incident response plan documented
+- [ ] .opt domain metadata generation verified
 
 ---
 
@@ -275,6 +425,23 @@ Response:
   "version": "1.0.0",
   "uptime": "3h 42m",
   "requests": 1542
+}
+```
+
+### Admin Health Endpoint
+
+```bash
+curl -H "Authorization: Bearer <admin-token>" \
+  http://localhost:3000/rfo/admin/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "cache_entries": 1542,
+  "uptime": "3h 42m"
 }
 ```
 
@@ -297,6 +464,26 @@ Response:
   "quality_trends": {
     "example.com": { "avg": 78, "samples": 42 }
   }
+}
+```
+
+### Admin System Stats
+
+```bash
+curl -H "Authorization: Bearer <admin-token>" \
+  http://localhost:3000/rfo/admin/stats
+```
+
+Response:
+```json
+{
+  "total_sites": 1542,
+  "total_handshakes": 12345,
+  "total_audit_events": 678,
+  "cache_entries": 1542,
+  "admin_users": 3,
+  "api_keys": 5,
+  "uptime": "3h 42m"
 }
 ```
 
@@ -335,6 +522,11 @@ FROM audit_logs
 WHERE created_at > NOW() - INTERVAL '24 hours'
 GROUP BY event_type, severity
 ORDER BY COUNT(*) DESC;
+
+-- Admin users
+SELECT id, username, role, created_at
+FROM admin_users
+ORDER BY created_at DESC;
 ```
 
 ---
@@ -407,6 +599,21 @@ npx wscat -c ws://localhost:3000/rfo/ws
 
 # Send subscribe message
 > {"type":"subscribe","payload":{"domains":["example.com"]}}
+```
+
+### Admin Login Failed
+
+```bash
+# Check admin user exists
+docker compose exec postgres psql -U rfo -d rfo_protocol -c "
+SELECT id, username, role FROM admin_users;
+"
+
+# Create admin user via API
+curl -X POST http://localhost:3000/rfo/admin/users \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{"username": "admin", "password": "secure-password", "role": "admin"}'
 ```
 
 ---

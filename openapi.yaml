@@ -63,6 +63,8 @@ tags:
     description: Registered site registry
   - name: Telemetry
     description: Engine telemetry and metrics
+  - name: Admin
+    description: Admin API (RBAC, user/key management)
 
 components:
   securitySchemes:
@@ -73,6 +75,13 @@ components:
       description: |
         API key for client authentication. Obtain keys from your RFO deployment administrator.
         Format: `X-API-Key: <your-api-key>`
+    AdminAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT token for admin authentication. Obtain via POST /rfo/admin/login.
+        Format: `Authorization: Bearer <jwt-token>`
 
   schemas:
     # ── Core Types ────────────────────────────────────────────────────────────
@@ -427,6 +436,80 @@ components:
           items:
             type: string
 
+    # ── Binary Protocol ───────────────────────────────────────────────────────
+    BinaryHeader:
+      type: object
+      description: Binary protocol header (11 bytes)
+      properties:
+        magic:
+          type: string
+          description: "Magic bytes: RFO\\0 (0x52464F00)"
+          example: "RFO\0"
+        version:
+          type: integer
+          description: Protocol version (0x0001)
+          example: 1
+        payload_type:
+          type: integer
+          description: "Payload type: 0x01=.mdoc, 0x02=.doc, 0x03=batch"
+          enum: [1, 2, 3]
+        length:
+          type: integer
+          description: Payload length in bytes
+          example: 1024
+
+    # ── .opt Domain ──────────────────────────────────────────────────────────
+    OptMetadata:
+      type: object
+      description: .opt domain metadata (SEO/GEO/AEO)
+      properties:
+        seo:
+          $ref: '#/components/schemas/SeoMetadata'
+        geo:
+          $ref: '#/components/schemas/GeoMetadata'
+        aeo:
+          $ref: '#/components/schemas/AeoMetadata'
+
+    SeoMetadata:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        canonical_url:
+          type: string
+        structured_data:
+          type: string
+        open_graph:
+          type: object
+
+    GeoMetadata:
+      type: object
+      properties:
+        llm_friendly_content:
+          type: boolean
+        direct_answers:
+          type: boolean
+        structured_data_format:
+          type: string
+        content_freshness:
+          type: string
+
+    AeoMetadata:
+      type: object
+      properties:
+        faq_schema:
+          type: boolean
+        qa_pairs:
+          type: array
+          items:
+            $ref: '#/components/schemas/QaPair'
+        featured_snippet_ready:
+          type: boolean
+        voice_search_optimized:
+          type: boolean
+
     # ── Errors ────────────────────────────────────────────────────────────────
     ErrorResponse:
       type: object
@@ -474,6 +557,7 @@ paths:
       description: |
         Public endpoint. Returns the full list of supported encodings, features,
         and protocol limits. Used by clients to discover what the server supports.
+        Includes .opt domain support, binary protocol, and document pipeline capabilities.
       operationId: getCapabilities
       security: []
       responses:
@@ -828,5 +912,375 @@ paths:
         '101':
           description: WebSocket upgrade successful
 
-security:
-  - ApiKeyAuth: []
+  # ── Admin API ───────────────────────────────────────────────────────────────
+  /rfo/admin/login:
+    post:
+      tags: [Admin]
+      summary: Admin login
+      description: |
+        Authenticate as an admin user and receive a JWT token.
+        The token expires after 24 hours.
+      operationId: adminLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  role:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        '401':
+          description: Invalid credentials
+
+  /rfo/admin/users:
+    post:
+      tags: [Admin]
+      summary: Create admin user
+      description: Create a new admin user (requires admin role).
+      operationId: createAdminUser
+      security:
+        - AdminAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, role]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                role:
+                  type: string
+                  enum: [admin, operator, viewer]
+      responses:
+        '201':
+          description: User created
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (requires admin role)
+
+  /rfo/admin/users/{id}/password:
+    put:
+      tags: [Admin]
+      summary: Change admin password
+      description: Change password for an admin user (requires admin role).
+      operationId: changeAdminPassword
+      security:
+        - AdminAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Password changed
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /rfo/admin/stats:
+    get:
+      tags: [Admin]
+      summary: System statistics
+      description: |
+        Returns system statistics including site count, handshake count,
+        cache entries, admin users, and API keys. Requires operator role.
+      operationId: getAdminStats
+      security:
+        - AdminAuth: []
+      responses:
+        '200':
+          description: System stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_sites:
+                    type: integer
+                  total_handshakes:
+                    type: integer
+                  total_audit_events:
+                    type: integer
+                  cache_entries:
+                    type: integer
+                  admin_users:
+                    type: integer
+                  api_keys:
+                    type: integer
+                  uptime:
+                    type: string
+
+  /rfo/admin/sites:
+    get:
+      tags: [Admin]
+      summary: List sites (paginated)
+      description: |
+        Returns paginated list of registered sites with search support.
+        Requires operator role.
+      operationId: listAdminSites
+      security:
+        - AdminAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated site list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sites:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Site'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  per_page:
+                    type: integer
+
+  /rfo/admin/sites/{domain}:
+    delete:
+      tags: [Admin]
+      summary: Delete site
+      description: Delete a registered site (requires admin role).
+      operationId: deleteAdminSite
+      security:
+        - AdminAuth: []
+      parameters:
+        - name: domain
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Site deleted
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /rfo/admin/audit:
+    get:
+      tags: [Admin]
+      summary: Audit logs
+      description: |
+        Returns paginated audit logs with filtering.
+        Requires operator role.
+      operationId: listAdminAudit
+      security:
+        - AdminAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: event_type
+          in: query
+          schema:
+            type: string
+        - name: severity
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+
+  /rfo/admin/keys:
+    get:
+      tags: [Admin]
+      summary: List API keys
+      description: List all API keys (requires operator role).
+      operationId: listAdminKeys
+      security:
+        - AdminAuth: []
+      responses:
+        '200':
+          description: API keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    created_at:
+                      type: string
+                      format: date-time
+                    revoked_at:
+                      type: string
+                      format: date-time
+    post:
+      tags: [Admin]
+      summary: Create API key
+      description: Create a new API key (requires admin role).
+      operationId: createAdminKey
+      security:
+        - AdminAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                permissions:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: API key created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  key:
+                    type: string
+
+  /rfo/admin/keys/{name}:
+    delete:
+      tags: [Admin]
+      summary: Revoke API key
+      description: Revoke an API key (requires admin role).
+      operationId: revokeAdminKey
+      security:
+        - AdminAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Key revoked
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /rfo/admin/cache/purge:
+    post:
+      tags: [Admin]
+      summary: Purge cache
+      description: Purge all cached entries (requires admin role).
+      operationId: purgeAdminCache
+      security:
+        - AdminAuth: []
+      responses:
+        '200':
+          description: Cache purged
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /rfo/admin/health:
+    get:
+      tags: [Admin]
+      summary: Admin health check
+      description: |
+        Detailed health check including database and cache status.
+        Requires operator role.
+      operationId: adminHealth
+      security:
+        - AdminAuth: []
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  database:
+                    type: string
+                  cache_entries:
+                    type: integer
+                  uptime:
+                    type: string
+
+paths:

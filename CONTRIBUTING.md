@@ -106,6 +106,36 @@ cargo clippy -- -D warnings
 | Modules | snake_case | `server/handlers.rs` |
 | Files | snake_case | `rfo_protocol.rs` |
 
+### Module Structure
+
+```
+src/
+├── main.rs              # Entry point
+├── lib.rs               # Library exports
+├── rfo_protocol.rs      # Core types
+├── protocol.rs          # Version negotiation, streaming
+├── parser.rs            # HTML/Markdown parser
+├── compiler.rs          # Content compiler
+├── crypto/
+│   ├── mod.rs           # HMAC, SHA, HKDF, content integrity
+│   └── site_id.rs       # Site ID generation
+├── domain.rs            # .opt domain support
+├── pipeline.rs          # Document pipeline
+├── binary.rs            # Binary protocol
+├── cache/mod.rs         # DashMap cache
+├── auth.rs              # API key management
+├── audit.rs             # Audit logging, DDoS
+├── admin.rs             # Admin API (RBAC)
+├── telemetry.rs         # Metrics
+├── client.rs            # Client SDK
+├── cli.rs               # CLI subcommands
+└── server/
+    ├── mod.rs
+    ├── handlers.rs      # HTTP handlers
+    ├── middleware.rs     # Rate limiting
+    └── websocket.rs     # WebSocket pub/sub
+```
+
 ### Error Handling
 
 - Use `Result<T, E>` for fallible operations
@@ -159,23 +189,28 @@ pub fn generate_site_id(domain: &str, secret: &str) -> String {
 
 ```
 tests/
-├── integration.rs    # HTTP stack tests
-├── security.rs       # Security tests
-├── concurrency.rs    # Race condition tests
-└── protocol.rs       # Protocol compliance tests
+├── integration.rs    # HTTP stack tests (16)
+├── security.rs       # Security tests (45)
+├── concurrency.rs    # Race condition tests (11)
+└── protocol.rs       # Protocol compliance tests (20)
+benches/
+└── rfo_benchmarks.rs # Criterion benchmarks (6 groups)
 ```
 
 ### Running Tests
 
 ```bash
-# All tests
+# All tests (200)
 cargo test
 
 # Specific suite
-cargo test --test security
-cargo test --test integration
-cargo test --test concurrency
-cargo test --test protocol
+cargo test --test security       # 45 security tests
+cargo test --test integration    # 16 integration tests
+cargo test --test concurrency    # 11 concurrency tests
+cargo test --test protocol       # 20 protocol compliance tests
+
+# Benchmarks
+cargo bench
 
 # With output
 cargo test -- --nocapture

@@ -47,6 +47,7 @@
 │      ┌──────────────────────────────────────┐                          │
 │      │         Handler Layer                 │                          │
 │      │  /rfo/handshake  /rfo/doc  /rfo/ws   │                          │
+│      │  /rfo/admin/*                        │                          │
 │      └──────────────┬───────────────────────┘                          │
 │                     │                                                   │
 │         ┌───────────┼───────────┬──────────────┐                      │
@@ -55,21 +56,22 @@
 │    │ Parser  │ │ Compiler│ │ Crypto  │ │  Telemetry  │              │
 │    │ HTML/MD │ │ .doc    │ │ HMAC    │ │  Metrics    │              │
 │    │ →Parsed │ │ .mdoc   │ │ Site ID │ │  Reports    │              │
-│    └────┬────┘ └────┬────┘ └─────────┘ └─────────────┘              │
-│         │           │                                                │
-│         ▼           ▼                                                │
-│    ┌──────────────────────────┐                                      │
-│    │     Cache (DashMap)      │                                      │
-│    │     TTL: 1 hour          │                                      │
-│    │     Domain → Payload     │                                      │
-│    └──────────┬───────────────┘                                      │
-│               │                                                       │
-│               ▼                                                       │
-│    ┌──────────────────────────┐                                      │
-│    │     PostgreSQL Database   │                                      │
-│    │  sites │ handshake_logs  │                                      │
-│    │  audit_logs │ users      │                                      │
-│    └──────────────────────────┘                                      │
+│    └────┬────┘ └────┬────┘ │ HKDF    │ └─────────────┘              │
+│         │           │      │ SHA-256 │                                │
+│         ▼           ▼      └─────────┘                                │
+│    ┌──────────────────────────┐                                        │
+│    │     Cache (DashMap)      │                                        │
+│    │     TTL: 1 hour          │                                        │
+│    │     Domain → Payload     │                                        │
+│    └──────────┬───────────────┘                                        │
+│               │                                                         │
+│               ▼                                                         │
+│    ┌──────────────────────────┐                                        │
+│    │     PostgreSQL Database   │                                        │
+│    │  sites │ handshake_logs  │                                        │
+│    │  audit_logs │ admin      │                                        │
+│    │  api_key_records         │                                        │
+│    └──────────────────────────┘                                        │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -95,7 +97,7 @@ rfo-core audit              # CLI mode: show audit logs
 
 **Framework**: Axum 0.7
 
-**Routing** (12 endpoints):
+**Routing** (12 core + 12 admin endpoints):
 
 ```
 GET  /rfo/health          → health_check          (public)
@@ -110,6 +112,19 @@ GET  /rfo/stream-mdoc/:domain → stream_mdoc       (protected)
 GET  /rfo/sites           → list_sites            (protected)
 GET  /rfo/telemetry       → telemetry             (protected)
 GET  /rfo/ws              → ws_handler            (public)
+
+POST /rfo/admin/login           → admin_login          (public)
+POST /rfo/admin/users           → create_admin_user    (admin)
+PUT  /rfo/admin/users/:id/password → change_password   (admin)
+GET  /rfo/admin/stats           → get_system_stats     (operator)
+GET  /rfo/admin/sites           → list_admin_sites     (operator)
+DELETE /rfo/admin/sites/:domain → delete_site          (admin)
+GET  /rfo/admin/audit           → list_audit_logs      (operator)
+GET  /rfo/admin/keys            → list_api_keys        (operator)
+POST /rfo/admin/keys            → create_api_key       (admin)
+DELETE /rfo/admin/keys/:name    → revoke_api_key       (admin)
+POST /rfo/admin/cache/purge     → purge_cache          (admin)
+GET  /rfo/admin/health          → admin_health         (operator)
 ```
 
 ### 3. Middleware Stack
@@ -197,11 +212,11 @@ ParsedContent
          └─ verification_signature: HMAC-SHA256
 ```
 
-### 6. Crypto (`crypto/site_id.rs`)
+### 6. Crypto (`crypto/`)
 
-**Responsibility**: Generate deterministic, time-windowed site identifiers.
+**Responsibility**: Production-grade cryptographic operations.
 
-**Algorithm**:
+#### Site ID Generation (`site_id.rs`)
 
 ```rust
 fn generate_site_id(domain: &str, secret: &str) -> String {
@@ -216,7 +231,123 @@ fn generate_site_id(domain: &str, secret: &str) -> String {
 - Rotates hourly: Prevents long-term tracking
 - Secret-dependent: Unforgeable without secret key
 
-### 7. Auth (`auth.rs`)
+#### Core Cryptography (`mod.rs`)
+
+```rust
+pub struct RfoCrypto {
+    secret: Vec<u8>,
+}
+
+impl RfoCrypto {
+    // HMAC operations
+    fn hmac_sha256(&self, message: &[u8]) -> String;
+    fn hmac_sha512(&self, message: &[u8]) -> String;
+    fn verify_hmac(&self, message: &[u8], signature: &str) -> bool;
+
+    // Hashing
+    fn sha256(&self, data: &[u8]) -> String;
+    fn sha512(&self, data: &[u8]) -> String;
+    fn hash_content(&self, domain: &str, content: &[u8]) -> String;
+
+    // Key derivation
+    fn derive_key(&self, salt: &[u8], info: &[u8]) -> Vec<u8>;
+
+    // Nonce operations
+    fn generate_nonce(&self) -> String;
+    fn verify_nonce_format(&self, nonce: &str) -> bool;
+    fn verify_nonce_freshness(&self, timestamp: i64) -> bool;
+
+    // Content integrity
+    fn content_hash(&self, domain: &str, content: &[u8]) -> String;
+    fn verify_content_integrity(&self, domain: &str, content: &[u8], hash: &str) -> bool;
+
+    // Domain binding
+    fn bind_domain(&self, domain: &str, content_hash: &str) -> String;
+    fn verify_domain_binding(&self, domain: &str, content_hash: &str, binding: &str) -> bool;
+
+    // Request signing
+    fn sign_request(&self, method: &str, path: &str, body: &[u8]) -> String;
+    fn verify_request_signature(&self, method: &str, path: &str, body: &[u8], signature: &str) -> bool;
+}
+```
+
+### 7. Domain (`domain.rs`)
+
+**Responsibility**: `.opt` domain parsing, SEO/GEO/AEO metadata generation.
+
+```rust
+pub struct RfoDomain {
+    pub subdomain: Option<String>,
+    pub domain: String,
+    pub tld: Tld,
+}
+
+pub enum Tld {
+    Standard(String),
+    Opt,
+}
+
+pub struct OptMetadata {
+    pub seo: SeoMetadata,
+    pub geo: GeoMetadata,
+    pub aeo: AeoMetadata,
+}
+```
+
+**Features**:
+- Parse any domain URL into structured components
+- Detect `.opt` TLD natively
+- Generate SEO metadata (title, description, canonical URL, structured data, Open Graph)
+- Generate GEO metadata (LLM-friendly content, direct answers, content freshness)
+- Generate AEO metadata (FAQ schema, Q&A pairs, featured snippet readiness)
+- Generate JSON-LD schemas for structured data
+- Generate FAQ schemas for AEO optimization
+
+### 8. Pipeline (`pipeline.rs`)
+
+**Responsibility**: Batch document generation for websites.
+
+```rust
+pub struct DocumentPipeline {
+    config: PipelineConfig,
+}
+
+pub struct PipelineConfig {
+    pub max_pages_per_site: usize,
+    pub quality_threshold: u8,
+    pub enable_aeo: bool,
+    pub enable_geo: bool,
+}
+```
+
+**Features**:
+- Compile individual pages (`.doc` and `.mdoc`)
+- Compile entire sites with statistics
+- Calculate quality scores for each page
+- Generate structured data for `.opt` domains
+- Batch processing with configurable limits
+
+### 9. Binary Protocol (`binary.rs`)
+
+**Responsibility**: Native Rust binary transfer of `.doc`/`.mdoc` payloads.
+
+```rust
+pub struct BinaryHeader {
+    pub magic: [u8; 4],        // 0x52464F00 (RFO\0)
+    pub version: u16,          // 0x0001
+    pub payload_type: u8,      // 0x01=.mdoc, 0x02=.doc, 0x03=batch
+    pub length: u32,           // Payload length
+}
+```
+
+**Features**:
+- 11-byte header (magic + version + type + length)
+- CRC32 checksums for payload integrity
+- Payload type markers for .mdoc/.doc/batch
+- Streaming reader for large payloads
+- Batch serialization support
+
+### 10. Auth (`auth.rs`)
 
 **Responsibility**: API key management and HMAC request signing.
 
@@ -251,7 +382,32 @@ Request with X-API-Key header
     └─▶ Not found → 401 Unauthorized
 ```
 
-### 8. Audit (`audit.rs`)
+### 11. Admin (`admin.rs`)
+
+**Responsibility**: Admin API with RBAC, user/key management.
+
+```rust
+pub struct AdminState {
+    db: PgPool,
+    jwt_secret: Vec<u8>,
+}
+
+pub struct AdminUser {
+    pub id: i64,
+    pub username: String,
+    pub password_hash: String,
+    pub role: String,
+    pub created_at: DateTime<Utc>,
+}
+
+pub enum AdminRole {
+    Admin,      // Full access
+    Operator,   // Read-only (stats, audit, keys)
+    Viewer,     // Read-only (stats, audit)
+}
+```
+
+### 12. Audit (`audit.rs`)
 
 **Responsibility**: Structured security event logging and DDoS protection.
 
@@ -273,7 +429,7 @@ pub struct DdosProtection {
 }
 ```
 
-### 9. Cache (`cache/mod.rs`)
+### 13. Cache (`cache/mod.rs`)
 
 **Responsibility**: High-performance in-memory caching with TTL.
 
@@ -291,7 +447,7 @@ struct CacheEntry {
 
 **Eviction**: Lazy — expired entries removed on access. No background threads.
 
-### 10. Telemetry (`telemetry.rs`)
+### 14. Telemetry (`telemetry.rs`)
 
 **Responsibility**: Request metrics, quality trends, and reporting.
 
@@ -307,7 +463,7 @@ pub struct TelemetryTracker {
 }
 ```
 
-### 11. WebSocket (`server/websocket.rs`)
+### 15. WebSocket (`server/websocket.rs`)
 
 **Responsibility**: Real-time pub/sub for domain updates.
 
@@ -315,21 +471,6 @@ pub struct TelemetryTracker {
 pub struct WsManager {
     subscribers: DashMap<String, Vec<broadcast::Sender<WsMessage>>>,
 }
-```
-
-**Message flow**:
-
-```
-Client ──subscribe──▶ WsManager
-                         │
-                         ▼
-                    Domain update occurs
-                         │
-                         ▼
-                    WsManager broadcasts to all subscribers
-                         │
-                         ▼
-                    Client ◀── update message
 ```
 
 ---
@@ -368,6 +509,42 @@ Client ──subscribe──▶ WsManager
      payload: { summary, token_count, qa_pairs } }
 ```
 
+### .opt Domain Flow
+
+```
+1. Agent sends POST /rfo/handshake
+   { domain_url: "https://mysite.opt", ... }
+
+2. Engine detects .opt TLD:
+   ├─ Parse: subdomain=None, domain="mysite", tld=Opt
+   ├─ Generate SEO metadata (title, description, canonical URL)
+   ├─ Generate GEO metadata (LLM-friendly, direct answers)
+   ├─ Generate AEO metadata (FAQ schema, Q&A pairs)
+   ├─ Generate JSON-LD schemas
+   └─ Generate FAQ structured data
+
+3. Compile with rich metadata:
+   ├─ .doc: Full content + structured data
+   └─ .mdoc: Token-optimized + AEO metadata
+
+4. Response includes .opt-specific fields
+```
+
+### Binary Stream Flow
+
+```
+1. Agent sends GET /rfo/stream/mysite.opt
+
+2. Engine serializes to binary:
+   ├─ BinaryHeader: magic=0x52464F00, version=0x0001, type=0x02, length=N
+   ├─ Payload: FullDocPayload bytes
+   └─ CRC32: checksum of payload bytes
+
+3. Stream response:
+   Content-Type: application/octet-stream
+   [11-byte header][payload bytes][4-byte CRC32]
+```
+
 ### Cache Hit Flow
 
 ```
@@ -379,27 +556,6 @@ Client ──subscribe──▶ WsManager
    └─ Cache HIT → Return cached payload (0ms processing)
 
 4. Response sent with X-Cache: HIT header
-```
-
-### WebSocket Update Flow
-
-```
-1. Agent connects: GET /rfo/ws → WebSocket upgrade
-
-2. Agent subscribes:
-   { type: "subscribe", domains: ["example.com"] }
-
-3. Server stores subscription in WsManager
-
-4. Domain example.com is recompiled (via CLI or API):
-
-5. WsManager broadcasts to all subscribers:
-   { type: "update",
-     payload: { domain: "example.com",
-                quality_score: 88,
-                timestamp: "2024-01-01T00:00:00Z" } }
-
-6. Agent receives real-time notification
 ```
 
 ---
@@ -417,6 +573,8 @@ Client ──subscribe──▶ WsManager
 | Content spoofing | HMAC-SHA256 verification signatures |
 | DDoS | Global connection limits, request throttling |
 | Unauthorized access | API key middleware on protected endpoints |
+| Body tampering | HMAC request signing |
+| Key compromise | HKDF key derivation, hourly rotation |
 
 ### Authentication Layers
 
@@ -442,6 +600,11 @@ Layer 5: Rate Limiting
     │   ├─ Per-IP: 100 req/min
     │   ├─ Global: 1000 req/min
     │   └─ Returns 429 Too Many Requests
+    │
+Layer 6: Admin RBAC
+    │   ├─ JWT tokens with role-based access
+    │   ├─ admin / operator / viewer roles
+    │   └─ Separate auth for admin endpoints
 ```
 
 ### Prompt Injection Defense
@@ -513,6 +676,43 @@ CREATE TABLE audit_logs (
 );
 ```
 
+### admin_users
+
+```sql
+CREATE TABLE admin_users (
+    id BIGSERIAL PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### admin_sessions
+
+```sql
+CREATE TABLE admin_sessions (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES admin_users(id),
+    token_hash TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### api_key_records
+
+```sql
+CREATE TABLE api_key_records (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    key_hash TEXT NOT NULL,
+    permissions TEXT[] DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ
+);
+```
+
 ---
 
 ## Design Decisions
@@ -564,3 +764,21 @@ CREATE TABLE audit_logs (
 **Choice**: `PayloadEncoding` serializes as `"application/json"` not `"Json"`
 
 **Reason**: Direct content-type strings are more self-documenting in wire format and avoid ambiguity with MIME type parsing.
+
+### 9. .opt as First-Class Citizen
+
+**Choice**: `.opt` domain has native parsing and metadata generation
+
+**Reason**: AI-optimized content needs structured metadata for LLM discovery. By building `.opt` into the protocol, websites that register `.opt` domains get automatic SEO/GEO/AEO optimization.
+
+### 10. Binary Protocol with CRC32
+
+**Choice**: Binary wire format with CRC32 checksums
+
+**Reason**: Binary transfer is ~30-40% smaller than JSON. CRC32 provides fast integrity verification without the overhead of SHA-256 for every payload.
+
+### 11. Separate Admin State
+
+**Choice**: Admin routes use separate `AdminState` (not `AppState`)
+
+**Reason**: Admin endpoints need different state (JWT secret, database pool) than core endpoints. Separate state avoids type mismatches in Axum routers and keeps the admin API isolated.

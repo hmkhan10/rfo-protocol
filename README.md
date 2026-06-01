@@ -21,25 +21,34 @@ RFO (**Research For Optimization**) is a next-generation application-layer netwo
 Today, AI agents scrape raw HTML, lose structural information, waste tokens on irrelevant content, and have no way to verify content authenticity. RFO replaces this chaos with a **cryptographically verified, token-optimized, structured content delivery protocol**.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        THE RFO PROTOCOL                             │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│   AI Agent                          RFO Engine                     │
-│      │                                   │                          │
-│      │  ──── POST /rfo/handshake ──────▶ │  1. Verify nonce         │
-│      │       { domain_url, nonce }       │  2. Fetch & parse        │
-│      │                                   │  3. Extract coordinates  │
-│      │                                   │  4. Generate site_id     │
-│      │                                   │  5. Compile .doc/.mdoc   │
-│      │                                   │  6. Score quality (0-100)│
-│      │  ◀──── HandshakeResponse ──────── │  7. Cache + return       │
-│      │       { header, payload }         │                          │
-│      │                                   │                          │
-│      │  Structured, verified, token-     │                          │
-│      │  optimized content for the LLM    │                          │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          THE RFO PROTOCOL                                │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   AI Agent                              RFO Engine                       │
+│      │                                       │                           │
+│      │  ──── POST /rfo/handshake ──────────▶ │  1. Verify nonce          │
+│      │       { domain_url, nonce }           │  2. Fetch & parse         │
+│      │                                       │  3. Extract coordinates   │
+│      │                                       │  4. Generate site_id      │
+│      │                                       │  5. Compile .doc/.mdoc    │
+│      │                                       │  6. Score quality (0-100) │
+│      │  ◀──── HandshakeResponse ──────────── │  7. Cache + return        │
+│      │       { header, payload }             │                           │
+│      │                                       │                           │
+│      │  Structured, verified, token-         │                           │
+│      │  optimized content for the LLM        │                           │
+│      │                                       │                           │
+│      │  ──── GET /rfo/doc/{domain} ────────▶ │  Return full .doc         │
+│      │  ◀──── FullDocPayload ────────────── │  (deep knowledge)         │
+│      │                                       │                           │
+│      │  ──── GET /rfo/mdoc/{domain} ───────▶ │  Return mini .mdoc        │
+│      │  ◀──── MiniDocPayload ────────────── │  (token-optimized)        │
+│      │                                       │                           │
+│      │  ──── GET /rfo/ws ──────────────────▶ │  WebSocket subscription   │
+│      │  ◀──── Real-time updates ──────────── │  (live domain changes)    │
+│      │                                       │                           │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Why RFO?
@@ -53,6 +62,7 @@ Today, AI agents scrape raw HTML, lose structural information, waste tokens on i
 | Real-time updates | Poll for changes | WebSocket pub/sub |
 | Prompt injection | Vulnerable | 16-pattern injection sanitizer |
 | Rate limiting | None | Per-IP + global DDoS protection |
+| Domain support | Standard TLDs only | Native `.opt` AI-optimized domains |
 
 ## Key Features
 
@@ -62,7 +72,11 @@ Today, AI agents scrape raw HTML, lose structural information, waste tokens on i
 - **Quality Scoring** — Automated 0-100 score based on content structure & AEO readiness
 - **Capability Negotiation** — JSON / MessagePack encoding, protocol versioning
 - **WebSocket Pub/Sub** — Real-time domain update notifications
-- **Binary Streaming** — Chunked transfer with checksums for large payloads
+- **Binary Streaming** — Chunked transfer with CRC32 checksums for large payloads
+- **.opt Domain Support** — Native AI-optimized TLD with SEO/GEO/AEO metadata
+- **Document Pipeline** — Automatic .doc/.mdoc generation for websites
+- **Admin API** — Full management interface with RBAC
+- **Advanced Cryptography** — HMAC-SHA256/SHA512, HKDF key derivation, content integrity
 - **API Key Auth** — HMAC request signing, per-key permissions
 - **DDoS Protection** — Per-IP rate limiting + global connection limits
 - **Audit Logging** — Structured security event trail
@@ -128,47 +142,125 @@ curl -X POST http://localhost:3000/rfo/handshake \
   }"
 ```
 
+### 4. Register a .opt domain
+
+```bash
+# Register and compile a .opt domain
+curl -X POST http://localhost:3000/rfo/handshake \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d "{
+    \"domain_url\": \"https://mysite.opt\",
+    \"coordinates\": { \"topic\": \"documentation\" },
+    \"requested_payload\": \"Mdoc\",
+    \"nonce\": \"$NONCE\",
+    \"timestamp\": $TIMESTAMP
+  }"
+```
+
 ## Architecture
 
 ```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         RFO CORE ENGINE                                   │
+│                                                                          │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────────┐│
+│  │  Parser   │→│ Compiler │→│  Cache   │→│     HTTP Server           ││
+│  │ HTML/MD   │  │ .doc     │  │ DashMap  │  │  Axum + Middleware       ││
+│  │ →Parsed   │  │ .mdoc    │  │ TTL-based│  │  Rate Limit + Auth      ││
+│  └──────────┘  │ Quality  │  └──────────┘  │  CORS + Audit            ││
+│                │ Score    │                 └──────────────────────────┘│
+│  ┌──────────┐  └──────────┘  ┌──────────┐  ┌──────────────────────────┐│
+│  │  Crypto   │               │ Telemetry│  │    WebSocket             ││
+│  │ HMAC-SHA256│              │ Metrics  │  │  WsManager pub/sub       ││
+│  │ SHA-512   │               │ Reports  │  │  Domain subscriptions    ││
+│  │ HKDF      │               └──────────┘  └──────────────────────────┘│
+│  └──────────┘                                                         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────────┐│
+│  │  Domain   │  │ Pipeline │  │  Binary  │  │     Admin API            ││
+│  │ .opt TLD  │  │ .doc     │  │ Protocol │  │  RBAC + Management       ││
+│  │ SEO/GEO   │  │ .mdoc    │  │ CRC32    │  │  Users + Keys + Audit    ││
+│  │ AEO       │  │ Generator│  │ Streaming│  │  Cache + Stats           ││
+│  └──────────┘  └──────────┘  └──────────┘  └──────────────────────────┘│
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐│
+│  │                    PostgreSQL Database                               ││
+│  │  sites │ handshake_logs │ audit_logs │ admin_users │ api_key_records ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+## .opt Domain — AI-Optimized TLD
+
+The `.opt` domain is a purpose-built TLD for AI-optimized content delivery:
+
+```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                        RFO CORE ENGINE                               │
+│                      .opt DOMAIN ARCHITECTURE                        │
+├──────────────────────────────────────────────────────────────────────┤
 │                                                                      │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐│
-│  │  Parser   │→│ Compiler │→│  Cache   │→│     HTTP Server       ││
-│  │ HTML/MD   │  │ .doc     │  │ DashMap  │  │  Axum + Middleware   ││
-│  │ →Parsed   │  │ .mdoc    │  │ TTL-based│  │  Rate Limit + Auth   ││
-│  └──────────┘  │ Quality  │  └──────────┘  │  CORS + Audit        ││
-│                │ Score    │                 └──────────────────────┘│
-│  ┌──────────┐  └──────────┘  ┌──────────┐  ┌──────────────────────┐│
-│  │  Crypto   │               │ Telemetry│  │    WebSocket         ││
-│  │ HMAC-SHA256│              │ Metrics  │  │  WsManager pub/sub   ││
-│  │ Site ID   │               │ Reports  │  │  Domain subscriptions││
-│  └──────────┘               └──────────┘  └──────────────────────┘│
+│   Website Owner                  RFO Protocol                       │
+│      │                               │                               │
+│      │  1. Create .doc pages        │                               │
+│      │  2. Create .mdoc pages       │                               │
+│      │  3. Register .opt domain     │                               │
+│      │  ──── POST /rfo/handshake ──▶│                               │
+│      │                               │  Compile + Verify + Score    │
+│      │  ◀─── Site ID + Quality ─────│                               │
+│      │                               │                               │
+│   AI Agent                          │                               │
+│      │  ──── GET /rfo/doc ─────────▶│  Full knowledge payload      │
+│      │  ◀─── .doc payload ─────────│  (deep content + verification)│
+│      │                               │                               │
+│      │  ──── GET /rfo/mdoc ────────▶│  Token-optimized payload     │
+│      │  ◀─── .mdoc payload ────────│  (< 1,500 tokens + Q&A)      │
+│      │                               │                               │
+│      │  ──── GET /rfo/ws ──────────▶│  Real-time updates           │
+│      │  ◀─── Live notifications ────│  (domain changes)            │
 │                                                                      │
-│  ┌──────────────────────────────────────────────────────────────────┐│
-│  │                    PostgreSQL Database                           ││
-│  │  sites │ handshake_logs │ audit_logs               ││
-│  └──────────────────────────────────────────────────────────────────┘│
+├──────────────────────────────────────────────────────────────────────┤
+│  SEO: Structured data, metadata, canonical URLs                      │
+│  GEO: LLM-friendly content, direct answers, structured data         │
+│  AEO: Q&A pairs, FAQ schema, featured snippets                      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 ## API Endpoints
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/rfo/health` | GET | No | Health check & protocol version |
-| `/rfo/capabilities` | GET | No | Server capabilities & features |
-| `/rfo/negotiate` | POST | No | Capability negotiation |
-| `/rfo/handshake` | POST | Yes | Duplex handshake (compile domain) |
-| `/rfo/batch-handshake` | POST | Yes | Batch handshake (up to 20 domains) |
-| `/rfo/doc/:domain` | GET | Yes | Full `.doc` payload |
-| `/rfo/mdoc/:domain` | GET | Yes | Mini `.mdoc` payload |
-| `/rfo/stream/:domain` | GET | Yes | Stream `.doc` (binary) |
-| `/rfo/stream-mdoc/:domain` | GET | Yes | Stream `.mdoc` (binary) |
-| `/rfo/sites` | GET | Yes | List registered sites |
-| `/rfo/telemetry` | GET | Yes | Telemetry dashboard |
-| `/rfo/ws` | GET | No | WebSocket (real-time updates) |
+### Public (No Auth)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/rfo/health` | GET | Health check & protocol version |
+| `/rfo/capabilities` | GET | Server capabilities & features |
+| `/rfo/negotiate` | POST | Capability negotiation |
+| `/rfo/ws` | GET | WebSocket (real-time updates) |
+
+### Protected (API Key Required)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/rfo/handshake` | POST | Duplex handshake (compile domain) |
+| `/rfo/batch-handshake` | POST | Batch handshake (up to 20 domains) |
+| `/rfo/doc/{domain}` | GET | Full `.doc` payload |
+| `/rfo/mdoc/{domain}` | GET | Mini `.mdoc` payload |
+| `/rfo/stream/{domain}` | GET | Stream `.doc` (binary) |
+| `/rfo/stream-mdoc/{domain}` | GET | Stream `.mdoc` (binary) |
+| `/rfo/sites` | GET | List registered sites |
+| `/rfo/telemetry` | GET | Telemetry dashboard |
+
+### Admin (Admin Auth Required)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/rfo/admin/login` | POST | Admin login (returns JWT token) |
+| `/rfo/admin/users` | POST | Create admin user |
+| `/rfo/admin/users/{id}/password` | PUT | Change password |
+| `/rfo/admin/stats` | GET | System statistics |
+| `/rfo/admin/sites` | GET | List sites (paginated, searchable) |
+| `/rfo/admin/sites/{domain}` | DELETE | Delete site |
+| `/rfo/admin/audit` | GET | Audit logs (paginated, filterable) |
+| `/rfo/admin/keys` | GET/POST | List/create API keys |
+| `/rfo/admin/keys/{name}` | DELETE | Revoke API key |
+| `/rfo/admin/cache/purge` | POST | Purge cache |
+| `/rfo/admin/health` | GET | Detailed health check |
 
 Full API spec: [`openapi.yaml`](openapi.yaml)
 
@@ -183,10 +275,16 @@ rfo-protocol/
 │   ├── protocol.rs          # Version negotiation, streaming, WebSocket types
 │   ├── parser.rs            # HTML/Markdown parser + injection sanitizer
 │   ├── compiler.rs          # Content → .doc/.mdoc compiler + quality scoring
-│   ├── crypto/site_id.rs    # HMAC-SHA256 site ID generation
+│   ├── crypto/
+│   │   ├── mod.rs           # HMAC-SHA256/SHA512, HKDF, content integrity
+│   │   └── site_id.rs       # HMAC-SHA256 site ID generation
+│   ├── domain.rs            # .opt domain support, SEO/GEO/AEO metadata
+│   ├── pipeline.rs          # Document pipeline (.doc/.mdoc generator)
+│   ├── binary.rs            # Binary protocol (native Rust transfer)
 │   ├── cache/mod.rs         # DashMap concurrent cache with TTL
 │   ├── auth.rs              # API key store, HMAC signing, middleware
 │   ├── audit.rs             # Audit logger, DDoS protection, CORS
+│   ├── admin.rs             # Admin API (RBAC, user/key management)
 │   ├── telemetry.rs         # Metrics, quality trends, reports
 │   ├── client.rs            # Rust client SDK
 │   ├── cli.rs               # CLI (compile, watch, serve, inspect, audit)
@@ -195,6 +293,8 @@ rfo-protocol/
 │       ├── handlers.rs      # HTTP route handlers
 │       ├── middleware.rs     # Rate limiting, IP extraction
 │       └── websocket.rs     # WebSocket pub/sub manager
+├── benches/
+│   └── rfo_benchmarks.rs    # Criterion benchmarks (parser, compiler, cache, crypto, e2e)
 ├── tests/
 │   ├── integration.rs       # Full HTTP stack tests (16)
 │   ├── security.rs          # Security tests (45)
@@ -202,7 +302,8 @@ rfo-protocol/
 │   └── protocol.rs          # Protocol compliance tests (20)
 ├── migrations/
 │   ├── 001_initial.sql      # sites, handshake_logs
-│   └── 002_audit_logs.sql   # audit_logs
+│   ├── 002_audit_logs.sql   # audit_logs
+│   └── 003_admin_architecture.sql  # admin_users, admin_sessions, api_key_records
 ├── .github/workflows/
 │   ├── ci.yml               # Lint → Test → Build → Security Audit
 │   └── release.yml          # Build → Docker → GitHub Release
@@ -227,7 +328,7 @@ rfo-protocol/
 ## Testing
 
 ```bash
-# Run all 145 tests
+# Run all 200 tests
 cargo test
 
 # Run specific suite
@@ -235,7 +336,25 @@ cargo test --test security      # 45 security tests
 cargo test --test integration   # 16 integration tests
 cargo test --test concurrency   # 11 concurrency tests
 cargo test --test protocol      # 20 protocol compliance tests
+
+# Run benchmarks
+cargo bench
 ```
+
+## Security
+
+- **HMAC-SHA256/SHA512** — Request signing and verification
+- **HKDF Key Derivation** — Secure key expansion from secrets
+- **Content Integrity** — SHA-256 hashing for payload verification
+- **API Key Authentication** — `X-API-Key` header on all protected endpoints
+- **HMAC Request Signing** — SHA-256 body integrity verification
+- **Nonce Replay Protection** — 5-minute freshness window
+- **DDoS Protection** — Per-IP (100/min) + global (1000) connection limits
+- **Prompt Injection Defense** — 16-pattern sanitizer (EN + ZH)
+- **Audit Logging** — All security events logged to PostgreSQL
+- **CORS** — Configurable allowed origins
+- **Read-Only Container** — Docker runs as non-root, read-only filesystem
+- **Admin RBAC** — Role-based access control for management API
 
 ## Deployment
 
@@ -254,19 +373,6 @@ curl -f http://localhost:3000/rfo/health
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the full production checklist.
 
-## Security
-
-- **API Key Authentication** — `X-API-Key` header on all protected endpoints
-- **HMAC Request Signing** — SHA-256 body integrity verification
-- **Nonce Replay Protection** — 5-minute freshness window
-- **DDoS Protection** — Per-IP (100/min) + global (1000) connection limits
-- **Prompt Injection Defense** — 16-pattern sanitizer (EN + ZH)
-- **Audit Logging** — All security events logged to PostgreSQL
-- **CORS** — Configurable allowed origins
-- **Read-Only Container** — Docker runs as non-root, read-only filesystem
-
-Report security issues responsibly. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
 ## Roadmap
 
 - [x] Phase 1: Core Engine Foundation
@@ -275,12 +381,17 @@ Report security issues responsibly. See [CONTRIBUTING.md](CONTRIBUTING.md).
 - [x] Phase 4: Advanced Cache & Telemetry
 - [x] Phase 5: Content Pipeline CLI
 - [x] Phase 6: Security Hardening
-- [ ] Phase 7: Content pipeline extensions
+- [x] Phase 7: Content pipeline extensions
 - [x] Phase 8: Protocol Extensions (streaming, WebSocket, capability negotiation)
 - [x] Phase 9: Production Deployment (Docker, CI/CD, OpenAPI)
-- [x] Phase 10: Testing & Hardening (145 tests, 2 bugs fixed)
+- [x] Phase 10: Testing & Hardening (200 tests, bugs fixed)
 - [x] Phase 11: Documentation & Architecture
-- [ ] Phase 12: Performance Optimization (benchmarks, profiling)
+- [x] Phase 12: Benchmarks, Admin API & Architecture
+- [x] Phase 13: .opt Domain Support (SEO/GEO/AEO)
+- [x] Phase 14: Document Pipeline (.doc/.mdoc generator)
+- [x] Phase 15: Binary Protocol (native Rust transfer)
+- [x] Phase 16: Production Cryptography (HMAC, HKDF, content integrity)
+- [ ] Phase 17: Final verification & launch readiness
 
 ## License
 
