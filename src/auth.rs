@@ -134,7 +134,7 @@ pub async fn api_key_middleware(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    if !store.validate(api_key).is_some() {
+    if store.validate(api_key).is_none() {
         tracing::warn!("Invalid API key attempted");
         return Err(StatusCode::UNAUTHORIZED);
     }

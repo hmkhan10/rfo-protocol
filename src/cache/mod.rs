@@ -93,6 +93,11 @@ impl RfoCache {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
+    /// Remove all entries from the cache.
+    pub fn clear(&self) {
+        self.inner.clear();
+    }
 }
 
 impl Default for RfoCache {

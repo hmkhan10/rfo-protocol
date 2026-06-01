@@ -159,17 +159,39 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let ws_manager = WsManager::new();
 
     let state = AppState {
-        db: pool,
-        cache,
+        db: pool.clone(),
+        cache: cache.clone(),
         rate_limit: rate_limit.clone(),
-        telemetry,
+        telemetry: telemetry.clone(),
         api_keys: api_keys.clone(),
         audit: audit.clone(),
         ddos: ddos.clone(),
         ws_manager: ws_manager.clone(),
     };
 
+    let admin_state = rfo_core::admin::AdminState {
+        db: pool,
+        api_keys: api_keys.clone(),
+        cache,
+        telemetry,
+    };
+
     // ── 8. Build Axum router ──────────────────────────────────────────
+    let admin_routes = Router::new()
+        .route("/login", post(rfo_core::admin::admin_login))
+        .route("/users", post(rfo_core::admin::create_admin_user))
+        .route("/users/{id}/password", axum::routing::put(rfo_core::admin::change_password))
+        .route("/stats", get(rfo_core::admin::get_system_stats))
+        .route("/sites", get(rfo_core::admin::list_admin_sites))
+        .route("/sites/{domain}", axum::routing::delete(rfo_core::admin::delete_site))
+        .route("/audit", get(rfo_core::admin::list_audit_logs))
+        .route("/keys", get(rfo_core::admin::list_api_keys))
+        .route("/keys", post(rfo_core::admin::create_api_key))
+        .route("/keys/{name}", axum::routing::delete(rfo_core::admin::revoke_api_key))
+        .route("/cache/purge", post(rfo_core::admin::purge_cache))
+        .route("/health", get(rfo_core::admin::admin_health))
+        .with_state(admin_state);
+
     let app = Router::new()
         // Public endpoints (no API key required)
         .route("/rfo/health", get(rfo_core::server::handlers::health_check))
@@ -184,6 +206,8 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/rfo/stream-mdoc/{domain}", get(rfo_core::server::handlers::stream_mdoc))
         .route("/rfo/sites", get(rfo_core::server::handlers::list_sites))
         .route("/rfo/telemetry", get(rfo_core::server::handlers::get_telemetry))
+        // Admin endpoints (separate state, no API key — admin token auth)
+        .nest("/rfo/admin", admin_routes)
         // WebSocket endpoint
         .route("/rfo/ws", get(
             rfo_core::server::websocket::ws_handler,
@@ -215,7 +239,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let bind_addr = std::env::var("RFO_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string());
     let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
-        .expect(format!("Failed to bind to {}", bind_addr).as_str());
+        .unwrap_or_else(|_| panic!("Failed to bind to {}", bind_addr));
 
     tracing::info!("RFO Core Engine listening on {}", bind_addr);
     tracing::info!("Protocol Version: {}", ProtocolVersion::current());
@@ -232,6 +256,18 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("  POST /rfo/negotiate         — Capability negotiation");
     tracing::info!("  GET  /rfo/ws                — WebSocket (real-time updates)");
     tracing::info!("  GET  /rfo/health            — Health check (public)");
+    tracing::info!("Admin:");
+    tracing::info!("  POST /rfo/admin/login       — Admin login");
+    tracing::info!("  POST /rfo/admin/users       — Create admin user");
+    tracing::info!("  GET  /rfo/admin/stats       — System statistics");
+    tracing::info!("  GET  /rfo/admin/sites       — List sites (paginated)");
+    tracing::info!("  DEL  /rfo/admin/sites/:d    — Delete site");
+    tracing::info!("  GET  /rfo/admin/audit       — Audit logs (paginated)");
+    tracing::info!("  GET  /rfo/admin/keys        — List API keys");
+    tracing::info!("  POST /rfo/admin/keys        — Create API key");
+    tracing::info!("  DEL  /rfo/admin/keys/:name  — Revoke API key");
+    tracing::info!("  POST /rfo/admin/cache/purge — Purge cache");
+    tracing::info!("  GET  /rfo/admin/health      — Detailed health");
     tracing::info!("Security:");
     tracing::info!("  API Key: X-API-Key header required for /rfo/* endpoints");
     tracing::info!("  CORS: Origins from RFO_CORS_ORIGINS env var");

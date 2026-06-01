@@ -489,13 +489,12 @@ fn compile_single(
     Ok((quality_score, mdoc.token_count))
 }
 
+type CompileResult = (crate::rfo_protocol::FullDocPayload, crate::rfo_protocol::MiniDocPayload, u8);
+
 fn compile_directory(
     dir: &Path,
     _output_dir: Option<&Path>,
-) -> Result<
-    dashmap::DashMap<String, (crate::rfo_protocol::FullDocPayload, crate::rfo_protocol::MiniDocPayload, u8)>,
-    Box<dyn std::error::Error>,
-> {
+) -> Result<dashmap::DashMap<String, CompileResult>, Box<dyn std::error::Error>> {
     let results = dashmap::DashMap::new();
 
     for entry in walkdir::WalkDir::new(dir)

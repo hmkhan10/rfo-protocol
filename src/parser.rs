@@ -138,8 +138,8 @@ pub fn parse_markdown(md: &str) -> ParsedContent {
             continue;
         }
 
-        if trimmed.starts_with("# ") {
-            content.title = trimmed[2..].to_string();
+        if let Some(stripped) = trimmed.strip_prefix("# ") {
+            content.title = stripped.to_string();
         } else if trimmed.starts_with("## ") || trimmed.starts_with("### ") {
             content.headings.push(trimmed.trim_start_matches('#').trim().to_string());
         } else if trimmed.starts_with("```") {
