@@ -96,7 +96,7 @@ pub enum WsMessage {
     #[serde(rename = "handshake")]
     Handshake(crate::rfo_protocol::HandshakeRequest),
     #[serde(rename = "update")]
-    Update { domain: String, quality_score: u8, timestamp: String },
+    Update { domain: String, quality_score: u32, timestamp: String },
     #[serde(rename = "ping")]
     Ping,
     #[serde(rename = "pong")]

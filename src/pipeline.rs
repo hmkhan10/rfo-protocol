@@ -72,7 +72,7 @@ pub struct CompiledPage {
     /// The .doc payload (if generated)
     pub doc: Option<FullDocPayload>,
     /// Quality score (0-100)
-    pub quality_score: u8,
+    pub quality_score: u32,
     /// Token count for .mdoc
     pub token_count: usize,
     /// Number of Q&A pairs
@@ -124,9 +124,9 @@ pub struct SiteStats {
     /// Average quality score
     pub avg_quality_score: f64,
     /// Min quality score
-    pub min_quality_score: u8,
-    /// Max quality score
-    pub max_quality_score: u8,
+    pub min_quality_score: u32,
+
+    pub max_quality_score: u32,
     /// Total tokens
     pub total_tokens: usize,
     /// Total Q&A pairs
@@ -288,7 +288,7 @@ impl DocumentPipeline {
         let pages_with_mdoc = site.pages.iter().filter(|p| p.mdoc.is_some()).count();
         let pages_with_doc = site.pages.iter().filter(|p| p.doc.is_some()).count();
 
-        let scores: Vec<u8> = site.pages.iter().map(|p| p.quality_score).collect();
+        let scores: Vec<u32> = site.pages.iter().map(|p| p.quality_score).collect();
         let avg_quality_score = if total_pages > 0 {
             scores.iter().map(|s| *s as f64).sum::<f64>() / total_pages as f64
         } else {

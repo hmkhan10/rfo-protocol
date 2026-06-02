@@ -23,13 +23,13 @@ pub struct CacheMetrics {
 pub struct QualityTrend {
     pub site_id: String,
     pub domain: String,
-    pub current_score: u8,
+    pub current_score: u32,
     pub history: Vec<ScoreSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreSnapshot {
-    pub score: u8,
+    pub score: u32,
     pub recorded_at: DateTime<Utc>,
 }
 
@@ -59,7 +59,7 @@ pub struct TelemetryReport {
 pub struct TopSite {
     pub site_id: String,
     pub domain: String,
-    pub quality_score: u8,
+    pub quality_score: u32,
     pub total_handshakes: u64,
 }
 
@@ -125,7 +125,7 @@ impl TelemetryTracker {
 
     // ── Quality Score Tracking ──────────────────────────────────────────
 
-    pub fn record_quality_score(&self, site_id: &str, domain: &str, score: u8) {
+    pub fn record_quality_score(&self, site_id: &str, domain: &str, score: u32) {
         self.inner
             .site_domains
             .insert(site_id.to_string(), domain.to_string());
@@ -330,7 +330,7 @@ mod tests {
     fn test_quality_history_cap() {
         let tracker = TelemetryTracker::new();
         for i in 0..60 {
-            tracker.record_quality_score("site1", "example.com", (i % 100) as u8);
+            tracker.record_quality_score("site1", "example.com", (i % 100) as u32);
         }
 
         let report = tracker.report(0);

@@ -375,7 +375,7 @@ fn test_quality_score_boundary_zero() {
     };
 
     let score = calculate_quality_score(&mdoc, &doc);
-    assert_eq!(score, 0);
+    assert_eq!(score, 1); // Minimum score is 1 (quality floor for any input)
 }
 
 #[test]
@@ -401,17 +401,17 @@ fn test_quality_score_boundary_max() {
 
     let score = calculate_quality_score(&mdoc, &doc);
     assert!(score >= 50, "Expected high score, got {}", score);
-    assert!(score <= 100);
+    // Quality score is unbounded — no upper cap
 }
 
 #[test]
-fn test_rfo_header_clamps_quality_score() {
+fn test_rfo_header_passes_quality_unchanged() {
     let header = rfo_core::rfo_protocol::RfoHeader::new(
         "test".to_string(),
         HashMap::new(),
-        150, // Over 100
+        150, // No cap — passes through
     );
-    assert_eq!(header.quality_score, 100); // Should be clamped
+    assert_eq!(header.quality_score, 150); // Not clamped
 
     let header = rfo_core::rfo_protocol::RfoHeader::new(
         "test".to_string(),

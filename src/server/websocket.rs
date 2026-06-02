@@ -30,7 +30,7 @@ impl WsManager {
     }
 
     /// Publish a domain update to all subscribers.
-    pub fn publish_update(&self, domain: &str, quality_score: u8) {
+    pub fn publish_update(&self, domain: &str, quality_score: u32) {
         let msg = serde_json::to_string(&WsMessage::Update {
             domain: domain.to_string(),
             quality_score,

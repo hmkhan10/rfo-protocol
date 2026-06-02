@@ -11,15 +11,15 @@ use uuid::Uuid;
 pub struct RfoHeader {
     pub site_id: String,
     pub coordinates: HashMap<String, String>,
-    pub quality_score: u8,
+    pub quality_score: u32,
 }
 
 impl RfoHeader {
-    pub fn new(site_id: String, coordinates: HashMap<String, String>, quality_score: u8) -> Self {
+    pub fn new(site_id: String, coordinates: HashMap<String, String>, quality_score: u32) -> Self {
         Self {
             site_id,
             coordinates,
-            quality_score: quality_score.min(100),
+            quality_score,
         }
     }
 }

@@ -7,12 +7,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let has_subcommand = args.len() > 1
         && matches!(
             args[1].as_str(),
-            "compile" | "watch" | "serve" | "inspect" | "audit" | "help" | "--help" | "-h"
+            "compile" | "watch" | "serve" | "serve-native" | "inspect" | "audit" | "core" | "opt" | "help"
         );
 
     if has_subcommand {
         let cli = Cli::parse();
         rfo_core::cli::execute(cli).await?;
+    } else if args.len() > 1 && (args[1] == "--help" || args[1] == "-h") {
+        println!("RFO Protocol Engine v{}", env!("CARGO_PKG_VERSION"));
+        println!();
+        println!("Usage: rfo-core [COMMAND]");
+        println!();
+        println!("Commands:");
+        println!("  compile   Compile a .md or .html file into .doc and .mdoc payloads");
+        println!("  watch     Watch a directory and auto-recompile on changes");
+        println!("  serve     Serve a directory as RFO endpoints");
+        println!("  serve-native  Start the native RFO binary transport server (TCP)");
+        println!("  inspect   Run a virtual handshake against any domain");
+        println!("  audit     Scan a directory and show quality scores");
+        println!("  core      Compile or inspect a .core file (complete site intelligence bundle)");
+        println!("  opt       Manage .opt domains in the native resolver registry");
+        println!();
+        println!("No command starts the HTTP server on port 3000.");
+        println!();
+        println!("Environment variables:");
+        println!("  RFO_SECRET_KEY     Secret for HMAC operations (required)");
+        println!("  DATABASE_URL       PostgreSQL connection string (required)");
+        println!("  RFO_API_KEYS       API keys: name:key,name:key");
+        println!("  RFO_CORS_ORIGINS   Allowed CORS origins");
+        println!("  RUST_LOG           Log level (trace/debug/info/warn/error)");
     } else {
         run_server().await?;
     }
@@ -222,10 +245,10 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
             rate_limit.clone(),
             rate_limit_middleware,
         ))
-        // Timeout (2s)
+        // Timeout (30s — handshake fetches external URLs)
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
             axum::http::StatusCode::REQUEST_TIMEOUT,
-            std::time::Duration::from_secs(2),
+            std::time::Duration::from_secs(30),
         ))
         // Body size limit (2MB)
         .layer(tower_http::limit::RequestBodyLimitLayer::new(2 * 1024 * 1024))

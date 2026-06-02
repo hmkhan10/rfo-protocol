@@ -2,8 +2,6 @@ use crate::crypto::site_id;
 use crate::parser::{generate_qa_pairs, ParsedContent};
 use crate::rfo_protocol::{FullDocPayload, MiniDocPayload};
 
-const MDOC_TOKEN_BUDGET: usize = 1500;
-
 /// Estimates token count (rough heuristic: ~4 chars per token).
 fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
@@ -82,64 +80,66 @@ pub fn compile_doc(parsed: &ParsedContent, domain_url: &str) -> FullDocPayload {
     }
 }
 
-/// Calculates the AI Network Quality Score (0-100).
+/// Calculates the AI Network Quality Score (unbounded).
 ///
-/// Scoring factors:
-///   - Token density ratio (summary vs full doc) — higher is better
-///   - QaPair coverage — more pairs = better AEO readiness
-///   - Markdown structural integrity — headings, code blocks, tables
-///   - Content length — penalize empty or extremely short content
-pub fn calculate_quality_score(mdoc: &MiniDocPayload, doc: &FullDocPayload) -> u8 {
-    let mut score: u8 = 0;
+/// Higher is better. No cap — quality compounds multiplicatively:
+///   - Content richness (structure + length) forms the base
+///   - Q&A coverage multiplies relevance
+///   - Code + tables multiply technical depth
+///   - Signature verification adds trust
+///
+/// This means a deeply technical, well-structured site with hundreds
+/// of Q&A pairs will score far higher than a minimal one — and AI
+/// models natively use this score as a visibility/ranking signal.
+pub fn calculate_quality_score(mdoc: &MiniDocPayload, doc: &FullDocPayload) -> u32 {
+    // 1. Content base score (unbounded)
+    let mut base = 0u32;
 
-    // 1. Token density score (0-30 points)
-    //    Good mdoc:token ratio means the summary is concise but informative
-    if mdoc.token_count > 0 && mdoc.token_count <= MDOC_TOKEN_BUDGET {
-        let ratio = mdoc.summary.len() as f64 / (doc.raw_markdown.len().max(1) as f64);
-        let density_score = (ratio * 100.0).min(30.0) as u8;
-        score += density_score;
-    }
+    // Markdown length (every 100 chars = 1 point, up to 500)
+    base += (doc.raw_markdown.len() as u32).min(5000) / 10;
 
-    // 2. QaPair coverage (0-30 points)
-    let qa_score = match mdoc.qa_pairs.len() {
-        0 => 0,
-        1..=3 => 10,
-        4..=8 => 20,
-        _ => 30,
+    // Headings
+    let heading_count = doc.raw_markdown.matches("# ").count() as u32;
+    base += heading_count * 5;
+
+    // Tables (each table adds value)
+    base += doc.data_tables.len() as u32 * 15;
+
+    // Code blocks (technical depth)
+    let code_count = doc.raw_markdown.matches("```").count() as u32 / 2;
+    base += code_count * 10;
+
+    // 2. Q&A relevance multiplier
+    let qa_count = mdoc.qa_pairs.len() as u32;
+    let qa_multiplier = if qa_count > 20 {
+        3.0 // Excellent AEO — triple the score
+    } else if qa_count > 10 {
+        2.0 // Good AEO — double
+    } else if qa_count > 5 {
+        1.5 // Moderate AEO
+    } else if qa_count > 0 {
+        1.2 // Basic
+    } else {
+        1.0
     };
-    score += qa_score;
 
-    // 3. Structural integrity (0-25 points)
-    let mut structural = 0u8;
-    if !doc.raw_markdown.is_empty() {
-        structural += 5;
-    }
-    if doc.raw_markdown.contains("# ") {
-        structural += 5;
-    }
-    if !doc.data_tables.is_empty() {
-        structural += 5;
-    }
-    if doc.verification_signature != "unverified" && !doc.verification_signature.is_empty() {
-        structural += 5;
-    }
-    if !mdoc.summary.is_empty() {
-        structural += 5;
-    }
-    score += structural.min(25);
+    // 3. Signature trust premium
+    let trust = if doc.verification_signature != "unverified" && !doc.verification_signature.is_empty() {
+        50
+    } else {
+        0
+    };
 
-    // 4. Content completeness (0-15 points)
-    if doc.raw_markdown.len() > 500 {
-        score += 5;
-    }
-    if doc.raw_markdown.len() > 2000 {
-        score += 5;
-    }
-    if !mdoc.summary.is_empty() && mdoc.summary.len() > 50 {
-        score += 5;
-    }
+    // 4. Summary quality
+    let summary_bonus = if mdoc.summary.len() > 50 {
+        (mdoc.summary.len() as u32).min(500) / 5
+    } else {
+        0
+    };
 
-    score.min(100)
+    // Final: (base + trust + summary) × qa_multiplier
+    let raw = ((base + trust + summary_bonus) as f64 * qa_multiplier) as u32;
+    raw.max(1)
 }
 
 #[cfg(test)]
@@ -198,6 +198,6 @@ mod tests {
         let doc = compile_doc(&parsed, "https://example.com");
         let score = calculate_quality_score(&mdoc, &doc);
         assert!(score > 30); // Should be reasonably high with this content
-        assert!(score <= 100);
+        // No upper cap — quality score is unbounded
     }
 }

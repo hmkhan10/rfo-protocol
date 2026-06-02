@@ -588,7 +588,7 @@ async fn upsert_site(
     pool: &PgPool,
     site_id: &str,
     domain_url: &str,
-    quality_score: u8,
+    quality_score: u32,
     coordinates: &HashMap<String, String>,
 ) {
     let coords_json = serde_json::to_value(coordinates).unwrap_or(serde_json::json!({}));

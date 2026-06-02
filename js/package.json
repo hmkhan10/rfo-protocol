@@ -1,0 +1,15 @@
+{
+  "name": "rfo-core",
+  "version": "0.1.0",
+  "description": "RFO Protocol — Native AI protocol bindings for Node.js",
+  "main": "index.js",
+  "license": "MIT",
+  "repository": "github:anomalyco/rfo",
+  "keywords": ["rfo", "ai", "protocol", "agent", "opt"],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "koffi": "^2.9"
+  }
+}

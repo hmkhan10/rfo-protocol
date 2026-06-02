@@ -11,8 +11,9 @@
 *.dylib
 
 # ── Cargo ────────────────────────────────────────────────────────────────────
-# Library crate: don't commit lock file (let users resolve their own versions)
-Cargo.lock
+# Binary project: commit Cargo.lock for reproducible builds
+# Library crate: uncomment the next line to ignore Cargo.lock
+# Cargo.lock
 
 # ── Environment / Secrets (NEVER commit) ────────────────────────────────────
 .env

@@ -139,7 +139,7 @@ X-API-Key: <your-api-key>
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `domain_url` | string (URI) | Yes | Target URL to compile |
-| `coordinates` | object | Yes | Client-provided semantic coordinates |
+| `coordinates` | object | Yes | Semantic location markers — tells RFO where in the knowledge space your request fits. Use topic, language, region to narrow results. RFO uses these to find the nearest content "location" via mathematical similarity (cosine distance, region clustering). |
 | `requested_payload` | enum | Yes | `"Doc"` or `"Mdoc"` |
 | `nonce` | string (UUID) | Yes | Replay protection nonce (≥16 chars) |
 | `timestamp` | integer | Yes | Unix timestamp (within 5 minutes of server time) |
@@ -187,9 +187,16 @@ This prevents replay attacks while allowing legitimate retries.
 
 ## Payload Schemas
 
-### MiniDocPayload (`.mdoc`)
+### MiniDocPayload (`.mdoc`) — Per-Page Index Card
 
-Token-optimized for LLM context windows (< 1,500 tokens).
+An `.mdoc` is a **token-optimized mini-document** — a concise "index card" for every indexing page on a website. Think of it as the one-page summary that RFO generates for *each individual page* so the protocol can natively understand your content without fetching the full page.
+
+Every `.mdoc` contains:
+- A tight summary (first 3 paragraphs, < 500 chars)
+- Estimated token count (< 1,500 tokens)
+- Q&A pairs extracted from the content (up to 20)
+
+**Why this matters**: Instead of an AI agent downloading and parsing an entire 10,000-word page, it can grab the `.mdoc` "index card" first — instantly understanding what the page is about, its key points, and whether it's worth diving deeper. This saves tokens, reduces latency, and makes content discovery efficient at web scale.
 
 ```json
 {
@@ -210,9 +217,9 @@ Token-optimized for LLM context windows (< 1,500 tokens).
 | `token_count` | integer | Estimated token count (~4 chars/token) |
 | `qa_pairs` | array | Question-answer pairs (max 20) |
 
-### FullDocPayload (`.doc`)
+### FullDocPayload (`.doc`) — Deep Knowledge Document
 
-Deep knowledge layout with full markdown and verification.
+A `.doc` is the **complete, deep-knowledge payload** for a web page — the full textbook version. Every paragraph, every code block, every table, all preserved as structured Markdown. Use `.doc` when you need the complete picture.
 
 ```json
 {
@@ -226,11 +233,11 @@ Deep knowledge layout with full markdown and verification.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `raw_markdown` | string | Full content as structured markdown |
+| `raw_markdown` | string | Full content as structured Markdown |
 | `data_tables` | array | Extracted data tables (markdown format) |
-| `verification_signature` | string | HMAC-SHA256 for content verification |
+| `verification_signature` | string | HMAC-SHA256 cryptographic signature — proves this content was compiled by RFO and hasn't been tampered with |
 
-### RfoHeader
+### RfoHeader — Domain Identity & Quality
 
 ```json
 {
@@ -246,9 +253,9 @@ Deep knowledge layout with full markdown and verification.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `site_id` | string | HMAC-SHA256 of `{domain}\|{hour_window}` |
-| `coordinates` | object | Semantic coordinates (auto-extracted + client-provided) |
-| `quality_score` | integer (0-100) | Content quality score |
+| `site_id` | string | Cryptographic domain identity — HMAC-SHA256 of `{domain}\|{hour_window}`, rotates hourly. Proves "this content came from example.com at this time." |
+| `coordinates` | object | Semantic location — auto-extracted from content + client-provided. RFO uses these to find the nearest content "location" via mathematical similarity. |
+| `quality_score` | integer (0-100) | Automated content rating. 80+ = well-structured for AI. Below 50 = needs improvement. Based on structure, code, tables, links, AEO readiness. |
 
 ---
 

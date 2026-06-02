@@ -270,7 +270,7 @@ fn test_handshake_response_structure() {
 // ── Quality Score Range Compliance ──────────────────────────────────────────
 
 #[test]
-fn test_quality_score_always_in_range() {
+fn test_quality_score_always_positive() {
     use rfo_core::compiler::calculate_quality_score;
     use rfo_core::rfo_protocol::{FullDocPayload, MiniDocPayload, QaPair};
 
@@ -298,32 +298,33 @@ fn test_quality_score_always_in_range() {
 
         let score = calculate_quality_score(&mdoc, &doc);
         assert!(
-            score <= 100,
-            "Score {} exceeds maximum with summary len {}",
+            score >= 1,
+            "Score {} should be at least 1 for non-empty content, summary len {}",
             score,
             summary.len()
         );
+        // Quality score is unbounded — no upper cap
     }
 }
 
 // ── RFO Header Compliance ───────────────────────────────────────────────────
 
 #[test]
-fn test_rfo_header_quality_clamping() {
-    // Quality score must be 0-100
+fn test_rfo_header_passes_quality_unchanged() {
+    // Quality score passes through without clamping
     let header = rfo_core::rfo_protocol::RfoHeader::new(
         "test".to_string(),
         HashMap::new(),
-        200, // Way over
+        200, // No cap — passes through
     );
-    assert_eq!(header.quality_score, 100);
+    assert_eq!(header.quality_score, 200);
 
     let header = rfo_core::rfo_protocol::RfoHeader::new(
         "test".to_string(),
         HashMap::new(),
-        101, // Just over
+        101, // No cap
     );
-    assert_eq!(header.quality_score, 100);
+    assert_eq!(header.quality_score, 101);
 }
 
 // ── MessagePack Encoding Compliance ─────────────────────────────────────────

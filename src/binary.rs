@@ -30,6 +30,12 @@ pub const TYPE_MDOC: u8 = 0x01;
 pub const TYPE_DOC: u8 = 0x02;
 pub const TYPE_BATCH: u8 = 0x03;
 
+/// Transport-level frame types (0x10+).
+pub const TYPE_HANDSHAKE: u8 = 0x10;
+pub const TYPE_RESOLVE_OPT: u8 = 0x11;
+pub const TYPE_CORE_FILE: u8 = 0x12;
+pub const TYPE_ERROR: u8 = 0xFF;
+
 /// Maximum payload size (10MB).
 pub const MAX_PAYLOAD_SIZE: usize = 10 * 1024 * 1024;
 
@@ -115,7 +121,10 @@ impl BinaryHeader {
         }
 
         let payload_type = bytes[6];
-        if payload_type != TYPE_MDOC && payload_type != TYPE_DOC && payload_type != TYPE_BATCH {
+        if payload_type != TYPE_MDOC && payload_type != TYPE_DOC && payload_type != TYPE_BATCH
+            && payload_type != TYPE_HANDSHAKE && payload_type != TYPE_RESOLVE_OPT
+            && payload_type != TYPE_CORE_FILE && payload_type != TYPE_ERROR
+        {
             return Err(BinaryError::InvalidType(payload_type));
         }
 

@@ -3,6 +3,15 @@ name = "rfo-core"
 version = "0.1.0"
 edition = "2021"
 description = "RFO Protocol Engine — Next-gen application-layer network protocol for AI web-scale agents"
+license = "MIT"
+repository = "https://github.com/hmkhan10/rfo-protocol.git"
+homepage = "https://github.com/hmkhan10/rfo-protocol"
+readme = "README.md"
+categories = ["network-programming", "web-programming", "compression"]
+keywords = ["rfo", "ai", "protocol", "agent", "optimization"]
+
+[lib]
+crate-type = ["lib", "cdylib"]
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }

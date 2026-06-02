@@ -136,7 +136,7 @@ async fn test_telemetry_concurrent_recordings() {
             tracker.record_quality_score(
                 &format!("site-{}", i),
                 &format!("domain-{}.com", i),
-                (i % 100) as u8,
+                (i % 100) as u32,
             );
         }));
     }

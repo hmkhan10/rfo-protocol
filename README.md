@@ -82,6 +82,97 @@ Today, AI agents scrape raw HTML, lose structural information, waste tokens on i
 - **Audit Logging** — Structured security event trail
 - **Prompt Injection Defense** — 16-pattern sanitizer (EN + ZH)
 
+---
+
+## Key Concepts (Glossary)
+
+Understanding RFO requires understanding its core building blocks:
+
+### `.doc` — Full Knowledge Document
+
+A `.doc` is the **complete, deep-knowledge payload** for a web page. Think of it as the full textbook version of a page — every paragraph, every code block, every table, all preserved as structured Markdown. It includes:
+
+- Full content as structured Markdown
+- All extracted data tables
+- A cryptographic verification signature (HMAC-SHA256)
+
+Use `.doc` when you need the **complete picture** — deep research, full analysis, or when you want the LLM to have every detail.
+
+### `.mdoc` — Mini Document (Per-Page Index Card)
+
+An `.mdoc` is a **token-optimized mini-document** — a concise "index card" for every indexing page on a website. Think of it as the **one-page summary** that RFO generates for *each individual page* so the protocol can natively understand your content without fetching the full page every time.
+
+Every `.mdoc` contains:
+- A tight summary (first 3 paragraphs, < 500 chars)
+- Estimated token count (< 1,500 tokens)
+- Q&A pairs extracted from the content (up to 20)
+
+**Why this matters**: Instead of an AI agent downloading and parsing an entire 10,000-word page, it can grab the `.mdoc` "index card" first — instantly understanding what the page is about, its key points, and whether it's worth diving deeper. This saves tokens, reduces latency, and makes content discovery efficient at web scale.
+
+### Coordinates — Where RFO Points You
+
+Coordinates in RFO are **semantic location markers** that tell the engine *where* in the knowledge space your request fits. Think of it like GPS coordinates, but for information instead of physical location.
+
+When you make a handshake request, you can provide coordinates like:
+```json
+{
+  "topic": "machine-learning",
+  "language": "Python",
+  "region": "Asia"
+}
+```
+
+RFO then uses these coordinates to:
+- **Match your local interest** — The engine finds the nearest content "location" in its knowledge graph, like how GPS finds the nearest address to your coordinates
+- **Narrow down results** — Instead of returning everything about a topic, RFO points you to the most relevant content region
+- **Enable location-aware AI** — If you're in Pakistan searching for documentation, RFO can bias toward content relevant to your region, language, and context
+
+The coordinates system uses mathematical similarity (cosine distance, region clustering) to find the **nearest possible match** between what you're looking for and what exists on the web.
+
+### Site ID — Your Domain's Digital Fingerprint
+
+A Site ID is a **cryptographic identity** for a domain, generated using HMAC-SHA256. It combines:
+- The domain name
+- A secret key (only the server knows)
+- A time window (rotates hourly)
+
+This creates a unique, unforgeable identifier that proves "this content came from example.com at this time" — without revealing the secret key.
+
+### Quality Score — Automated Content Rating
+
+Every compiled page gets a **quality score from 0 to 100**, based on:
+- Content length and structure (headings, paragraphs)
+- Code blocks and technical content
+- Data tables
+- Link quality and structure
+- AEO (Answer Engine Optimization) readiness
+
+A score of 80+ means the content is well-structured for AI consumption. Below 50 means the page needs improvement.
+
+### AEO — Answer Engine Optimization
+
+AEO is the practice of structuring content so AI agents can extract direct answers. RFO's AEO system:
+- Extracts Q&A pairs from headings and content
+- Generates FAQ structured data (JSON-LD)
+- Scores content for "featured snippet" readiness
+- Optimizes for voice search queries
+
+### .opt Domain — AI-Optimized TLD
+
+The `.opt` domain is a purpose-built top-level domain for AI-optimized content. Websites that use `.opt` get:
+- Automatic SEO/GEO/AEO metadata generation
+- JSON-LD structured data
+- FAQ schema generation
+- Native integration with RFO's content pipeline
+
+### Binary Protocol — Native Rust Transfer
+
+RFO's binary protocol transfers `.doc` and `.mdoc` payloads as raw bytes with:
+- 11-byte header (magic, version, type, length)
+- CRC32 checksums for integrity
+- ~30-40% smaller than JSON
+- Streaming support for large payloads
+
 ## Quick Start
 
 ### 1. Run with Docker (recommended)
@@ -391,7 +482,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for the full production checklist.
 - [x] Phase 14: Document Pipeline (.doc/.mdoc generator)
 - [x] Phase 15: Binary Protocol (native Rust transfer)
 - [x] Phase 16: Production Cryptography (HMAC, HKDF, content integrity)
-- [ ] Phase 17: Final verification & launch readiness
+- [x] Phase 17: Final verification & launch readiness
 
 ## License
 

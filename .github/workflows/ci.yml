@@ -58,7 +58,7 @@ jobs:
         env:
           POSTGRES_DB: rfo_protocol_test
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: test_password
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
         ports:
           - 5432:5432
         options: >-
@@ -68,8 +68,8 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgres://postgres:test_password@localhost:5432/rfo_protocol_test
-      RFO_SECRET_KEY: test_secret_key_for_ci_only_32_bytes!
+      DATABASE_URL: postgres://postgres:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/rfo_protocol_test
+      RFO_SECRET_KEY: ${{ secrets.RFO_SECRET_KEY }}
 
     steps:
       - uses: actions/checkout@v4
